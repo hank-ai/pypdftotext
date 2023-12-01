@@ -1,0 +1,46 @@
+{
+  "folders": [
+    {
+      "path": "."
+    }
+  ],
+  "settings": {
+    "files.insertFinalNewline": true,
+    "files.trimFinalNewlines": true,
+    "files.trimTrailingWhitespace": true,
+    "notebook.output.textLineLimit": 5000,
+    "python.analysis.extraPaths": ["${workspaceFolder}/app/"],
+    "python.autoComplete.extraPaths": ["${workspaceFolder}/app/"],
+    "jupyter.notebookFileRoot": "${workspaceFolder}/app/",
+    "jupyter.debugJustMyCode": true,
+    "python.testing.pytestEnabled": true,
+    "python.testing.pytestArgs": ["--import-mode=importlib"],
+    "editor.formatOnSave": true,
+    "editor.formatOnSaveMode": "file",
+    "python.languageServer": "Pylance",
+    "black-formatter.args": ["-l", "99"],
+    "mypy-type-checker.args": [
+      "--check-untyped-defs",
+      "--follow-imports=silent",
+      "--ignore-missing-imports",
+      "--show-column-numbers"
+    ],
+    "mypy-type-checker.ignorePatterns": ["scripts/*"],
+    "pylint.args": [
+      "--generated-members",
+      "numpy.*,pdftotext.*,cv2.*",
+      "--disable",
+      "W0311,R0903"
+    ],
+    "pylint.ignorePatterns": [
+      "**/site-packages/**/*.py",
+      "./.vscode/*.py",
+      "**/tests/**",
+      "**/scripts/**"
+    ],
+    "jupyter.interactiveWindow.textEditor.autoAddNewCell": false,
+    "isort.check": true,
+    "mypy-type-checker.reportingScope": "file",
+    "mypy-type-checker.preferDaemon": true
+  }
+}
