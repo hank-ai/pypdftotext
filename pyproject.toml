@@ -1,5 +1,5 @@
 [build-system]
-requires = ["flit_core>=3.4"]
+requires = ["flit_core>=3.4,<4"]
 build-backend = "flit_core.buildapi"
 
 [project]
@@ -16,7 +16,7 @@ classifiers = [
   "License :: OSI Approved :: MIT License",
   "Operating System :: OS Independent",
 ]
-dependencies = ["pypdf>3.10"]
+dependencies = ["pypdf >=3.16"]
 
 [project.urls]
 Home = "https://github.com/hank-ai/pypdftotext"
