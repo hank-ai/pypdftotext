@@ -16,7 +16,7 @@ classifiers = [
   "License :: OSI Approved :: MIT License",
   "Operating System :: OS Independent",
 ]
-dependencies = ["pypdf"]
+dependencies = ["pypdf>3.10"]
 
 [project.urls]
 Home = "https://github.com/hank-ai/pypdftotext"
