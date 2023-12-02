@@ -1,6 +1,6 @@
 """Structured text extraction extension for pypdf"""
 
-__version__ = "0.0.1"
+__version__ = "0.0.2"
 import io
 from pathlib import Path
 
