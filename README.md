@@ -1,3 +1,15 @@
+# ***DEPRECATED***
+
+This functionality has been incoporated into [pypdf](https://github.com/py-pdf/pypdf/). With pypdf>=4.0.0, use page.extract_text(extraction_mode="layout").
+
+Example:
+```python3
+from pypdf import PdfReader
+pdf_reader = PdfReader("/path/to/your.pdf")
+text_pages = [page.extract_text(extraction_mode="layout") for page in pdf_reader.pages]
+```
+
+
 # pypdftotext
 **_A structured text extraction extension for pypdf_**...
 
