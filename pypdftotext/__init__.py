@@ -1,6 +1,6 @@
 """Extract text from pdf pages from codebehind or Azure OCR as required"""
 
-__version__ = "0.0.4"
+__version__ = "0.0.5"
 
 import io
 import json
@@ -78,7 +78,7 @@ def pdf_text_pages(
     font_height_weight = AZURE_READ.font_height_weight = kwargs.pop(
         "font_height_weight", constants.FONT_HEIGHT_WEIGHT
     )
-    scale_weight = kwargs.pop("scale_weight", 1.25)
+    scale_weight = kwargs.pop("scale_weight", constants.SCALE_WEIGHT)
     if kwargs:
         constants.log(f"Unrecognized extract text kwargs {kwargs.keys()!r}.")
     assert isinstance(pdf_reader.stream, io.BytesIO)
@@ -118,7 +118,7 @@ def pdf_text_pages(
             pdf_pbar.set_postfix_str("!!! CORRUPTION DETECTED !!!")
             constants.log(
                 f"Clearing corrupt pdf text {pg_idx=};"
-                f" {len(txt)=} > {constants.MAX_CHARS_PER_PDF_PAGE} limit.",
+                f" {len(txt)=} > {constants.MAX_CHARS_PER_PDF_PAGE} char limit.",
             )
             txt = ""
         if txt and replace_byte_codes:
@@ -126,8 +126,12 @@ def pdf_text_pages(
             for old_bytes, new_bytes in replace_byte_codes.items():
                 byts = byts.replace(old_bytes, new_bytes)
             txt = byts.decode()
-        if AZURE_READ.client is None and constants.AZURE_DOCINTEL_AUTO_CLIENT:
-            AZURE_READ.create_client()
+        if (  # auto client is enabled and this one needs to OCR, so...
+            AZURE_READ.client is None
+            and constants.AZURE_DOCINTEL_AUTO_CLIENT
+            and len(txt.splitlines()) <= min_lines_ocr_trigger
+        ):
+            AZURE_READ.create_client()  # ... create the client.
         if constants.DISABLE_OCR or AZURE_READ.client is None:
             return txt
         # add as an OCR candidate if page has too few lines
