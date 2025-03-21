@@ -1,6 +1,6 @@
 """Extract text from pdf pages from codebehind or Azure OCR as required"""
 
-__version__ = "0.0.3"
+__version__ = "0.0.4"
 
 import io
 import json
@@ -126,6 +126,8 @@ def pdf_text_pages(
             for old_bytes, new_bytes in replace_byte_codes.items():
                 byts = byts.replace(old_bytes, new_bytes)
             txt = byts.decode()
+        if AZURE_READ.client is None and constants.AZURE_DOCINTEL_AUTO_CLIENT:
+            AZURE_READ.create_client()
         if constants.DISABLE_OCR or AZURE_READ.client is None:
             return txt
         # add as an OCR candidate if page has too few lines
