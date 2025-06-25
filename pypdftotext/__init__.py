@@ -1,6 +1,6 @@
 """Extract text from pdf pages from codebehind or Azure OCR as required"""
 
-__version__ = "0.0.5"
+__version__ = "0.0.6"
 
 import io
 import json
@@ -57,10 +57,14 @@ def pdf_text_pages(
             contiguous strings when calculating overall average fixed char
             width. Adjust as needed to control for excessive whitespace.
             Defaults to `constants.SCALE_WEIGHT`.
-        font_height_weight (float): Factor for adjusting preserved vertical
-            whitespace in the fixed width output. If `preserve_vertical_whitespace`
-            is set to False, this setting will have no effect. NOTE: Higher values
-            result in fewer blank lines. Defaults to `constants.FONT_HEIGHT_WEIGHT`.
+        font_height_weight (float): Factor for adjusting line splitting behaviors
+            and preserved vertical whitespace in fixed width embedded text output.
+            NOTE: Higher values result in fewer blank lines but increase the
+            likelihood of triggering a split due to font height based y offsets.
+            Defaults to `constants.FONT_HEIGHT_WEIGHT`.
+        suppress_embedded_text (bool): if true, embedded text extraction will not
+            be attempted. Assuming OCR is available, all pages will be OCR'd by
+            default. Defaults to `constants.SUPPRESS_EMBEDDED_TEXT`, aka False.
 
     Returns:
         list[str]: a string of text extracted for each page
@@ -79,9 +83,11 @@ def pdf_text_pages(
         "font_height_weight", constants.FONT_HEIGHT_WEIGHT
     )
     scale_weight = kwargs.pop("scale_weight", constants.SCALE_WEIGHT)
+    suppress_embedded_text = kwargs.pop("suppress_embedded_text", constants.SUPPRESS_EMBEDDED_TEXT)
     if kwargs:
         constants.log(f"Unrecognized extract text kwargs {kwargs.keys()!r}.")
     assert isinstance(pdf_reader.stream, io.BytesIO)
+    AZURE_READ.reset()
     pdf_pbar = tqdm(
         (
             (i, pg)
@@ -96,7 +102,7 @@ def pdf_text_pages(
 
     def _page_text(pg: PageObject, pg_idx: int) -> str | int:
         nonlocal corruption_detected
-        if corruption_detected:
+        if corruption_detected or suppress_embedded_text:
             txt = ""
         else:
             try:
@@ -121,11 +127,6 @@ def pdf_text_pages(
                 f" {len(txt)=} > {constants.MAX_CHARS_PER_PDF_PAGE} char limit.",
             )
             txt = ""
-        if txt and replace_byte_codes:
-            byts = txt.encode()
-            for old_bytes, new_bytes in replace_byte_codes.items():
-                byts = byts.replace(old_bytes, new_bytes)
-            txt = byts.decode()
         if (  # auto client is enabled and this one needs to OCR, so...
             AZURE_READ.client is None
             and constants.AZURE_DOCINTEL_AUTO_CLIENT
@@ -160,6 +161,15 @@ def pdf_text_pages(
                 txt = ""
             repl_idx = og_pg_idx if page_indices is None else page_indices.index(og_pg_idx)
             result[repl_idx] = txt
+
+    # perform byte code substitutions per 'replace_byte_codes' arg
+    for txt in result:
+        if txt and replace_byte_codes:
+            byts = txt.encode()
+            for old_bytes, new_bytes in replace_byte_codes.items():
+                byts = byts.replace(old_bytes, new_bytes)
+            txt = byts.decode()
+
     constants.log("Text extraction complete...")
     return result
 
@@ -170,7 +180,7 @@ def pdf_text_page_lines(
     page_indices: list[int] | None = None,
     replace_byte_codes: dict[bytes, bytes] | None = None,
     **kwargs,  # prevent errors due to bad args in upstream config dicts
-) -> list[str]:
+) -> list[list[str]]:
     """
     Extract text from PDF pages and return as a list of lines for each page.
 
@@ -208,10 +218,14 @@ def pdf_text_page_lines(
             contiguous strings when calculating overall average fixed char
             width. Adjust as needed to control for excessive whitespace.
             Defaults to `constants.SCALE_WEIGHT`.
-        font_height_weight (float): Factor for adjusting preserved vertical
-            whitespace in the fixed width output. If `preserve_vertical_whitespace`
-            is set to False, this setting will have no effect. NOTE: Higher values
-            result in fewer blank lines. Defaults to `constants.FONT_HEIGHT_WEIGHT`.
+        font_height_weight (float): Factor for adjusting line splitting behaviors
+            and preserved vertical whitespace in fixed width embedded text output.
+            NOTE: Higher values result in fewer blank lines but increase the
+            likelihood of triggering a split due to font height based y offsets.
+            Defaults to `constants.FONT_HEIGHT_WEIGHT`.
+        suppress_embedded_text (bool): if true, embedded text extraction will not
+            be attempted. Assuming OCR is available, all pages will be OCR'd by
+            default. Defaults to `constants.SUPPRESS_EMBEDDED_TEXT`, aka False.
 
     Returns:
         list[list[str]]: a list of lines of text extracted for each page

@@ -16,7 +16,7 @@ classifiers = [
   "License :: OSI Approved :: MIT License",
   "Operating System :: OS Independent",
 ]
-dependencies = ["pypdf >=5.2", "tqdm", "azure-ai-documentintelligence ==1.0.1"]
+dependencies = ["pypdf ==5.2", "tqdm", "azure-ai-documentintelligence ==1.0.1"]
 
 [project.urls]
 Home = "https://github.com/hank-ai/pypdftotext"
