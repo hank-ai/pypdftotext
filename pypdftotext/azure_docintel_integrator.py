@@ -23,7 +23,7 @@ from . import constants
 def _rotate_bbox(
     p: list[float], angle: float, width: float = 8.5, height: float = 11
 ) -> list[float]:
-    if abs(angle) < 5:
+    if abs(angle) < constants.MIN_OCR_ROTATION_DEGREES:
         return p
     angle = math.radians(angle)
     _sin = math.sin(angle)
@@ -83,6 +83,10 @@ class AzureDocIntelIntegrator:
         constants.log("Failed to create Azure OCR Client.")
         return False
 
+    def reset(self):
+        """Clear last_result and last_page_list from previous run."""
+        self.last_result = AnalyzeResult({})
+
     def ocr_pages(self, pdf: bytes, pages: list[int], debug_path: Path | None = None) -> list[str]:
         """
         Read the text from supplied pdf page indices.
@@ -118,7 +122,10 @@ class AzureDocIntelIntegrator:
                 BTGroup(
                     tx=rotated_polygon[0] * 100,
                     ty=rotated_polygon[1] * 100,
-                    font_size=(_fsz := (rotated_polygon[-1] - rotated_polygon[1]) * 100),
+                    font_size=(
+                        _fsz := (rotated_polygon[-1] - rotated_polygon[1])
+                        * constants.OCR_FONT_SIZE_MULT
+                    ),
                     font_height=_fsz,
                     text=_line.content,
                     displaced_tx=rotated_polygon[2] * 100,
@@ -165,6 +172,61 @@ class AzureDocIntelIntegrator:
                 )
             )
         return results
+
+    def handwritten_ratio(
+        self,
+        page_index: int,
+        handwritten_confidence_limit: float | None = None,
+    ) -> float:
+        """
+        Given a page *index*, returns the ratio of handwritten to total characters on the page.
+
+        Args:
+            page_index: the 0-based index of the page to analyze
+            handwritten_confidence_limit: the spans of handwritten styles with confidences
+                less than this limit will not be considered. Defaults to
+                constants.OCR_HANDWRITTEN_CONFIDENCE_LIMIT.
+
+        Returns:
+            float: 0.0 if the supplied page index was not OCR'd or of length 0.0. Otherwise
+            the ratio of the sum of all handwritten spans on the page to the total page span.
+        """
+        handwritten_confidence_limit = (
+            constants.OCR_HANDWRITTEN_CONFIDENCE_LIMIT
+            if handwritten_confidence_limit is None
+            else handwritten_confidence_limit
+        )
+        if any(
+            # find the page at the supplied index. otherwise return 0.0 (final return below)
+            (_selected_page := page).page_number == page_index + 1
+            for page in self.last_result.pages
+        ):
+            # a page should only have one span, but we'll treat as if there could be more
+            # just in case. Get the min offset from all spans as the start and the max
+            # offset + length as the page end.
+            page_start = min(span.offset for span in _selected_page.spans)
+            page_end = max(span.offset + span.length for span in _selected_page.spans)
+            if page_end - page_start <= 0:
+                # whoops! something's wrong. We should probably throw an exception here, but
+                # we'll fail open for now as it fits our use case.
+                return 0.0
+            # lets get the sum of span lengths for all is_handwritten styles with confidences
+            # >= our threshold that also occur between page_start and page_end!
+            handwritten_length = sum(
+                (
+                    (span.offset + min(span.length, page_end)) - span.offset
+                    for style in (self.last_result.styles or [])
+                    if style.is_handwritten and style.confidence >= handwritten_confidence_limit
+                    for span in style.spans
+                    if page_start <= span.offset < page_end
+                ),
+                start=0,
+            )
+            # Guess we'll cap our value at 1.0. We should probably throw and exception here
+            # also, but again we'll fail open for now as it suite our use case.
+            return min(handwritten_length / (page_end - page_start), 1.0)
+
+        return 0.0
 
 
 AZURE_READ = AzureDocIntelIntegrator()
