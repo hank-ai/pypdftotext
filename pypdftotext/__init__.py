@@ -1,6 +1,6 @@
 """Extract text from pdf pages from codebehind or Azure OCR as required"""
 
-__version__ = "0.0.6"
+__version__ = "0.0.7"
 
 import io
 import json
@@ -163,12 +163,13 @@ def pdf_text_pages(
             result[repl_idx] = txt
 
     # perform byte code substitutions per 'replace_byte_codes' arg
-    for txt in result:
-        if txt and replace_byte_codes:
-            byts = txt.encode()
-            for old_bytes, new_bytes in replace_byte_codes.items():
-                byts = byts.replace(old_bytes, new_bytes)
-            txt = byts.decode()
+    if replace_byte_codes:
+        for idx, txt in enumerate(result):
+            if txt:
+                byts = txt.encode()
+                for old_bytes, new_bytes in replace_byte_codes.items():
+                    byts = byts.replace(old_bytes, new_bytes)
+                result[idx] = byts.decode()
 
     constants.log("Text extraction complete...")
     return result
