@@ -1,6 +1,6 @@
 """Extract text from pdf pages from codebehind or Azure OCR as required"""
 
-__version__ = "0.0.7"
+__version__ = "0.0.8"
 
 import io
 import json
@@ -130,13 +130,16 @@ def pdf_text_pages(
         if (  # auto client is enabled and this one needs to OCR, so...
             AZURE_READ.client is None
             and constants.AZURE_DOCINTEL_AUTO_CLIENT
-            and len(txt.splitlines()) <= min_lines_ocr_trigger
+            # this originally compared `len(txt.splitlines())` which was
+            # VERY inefficient. The + 1 below preserves the original
+            # behavior for the `min_lines_ocr_trigger` parameter
+            and txt.count("\n") + 1 <= min_lines_ocr_trigger
         ):
             AZURE_READ.create_client()  # ... create the client.
         if constants.DISABLE_OCR or AZURE_READ.client is None:
             return txt
-        # add as an OCR candidate if page has too few lines
-        if len(txt.splitlines()) <= min_lines_ocr_trigger:
+        # add as an OCR candidate if page has too few lines. See + 1 comment above.
+        if txt.count("\n") + 1 <= min_lines_ocr_trigger:
             return pg_idx
         return txt
 
