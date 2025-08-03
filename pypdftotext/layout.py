@@ -119,7 +119,7 @@ def dedented_groups(groups: list[CharGroup]) -> list[CharGroup]:
         for grp in sorted(groups, key=lambda x: (-x.ty, -x.tx), reverse=True)
         if grp.text
     ]
-    if logger.getEffectiveLevel() >= logging.DEBUG:
+    if logger.getEffectiveLevel() == logging.DEBUG:
         logger.debug("**** DEDENTED GROUPS ****\n%s\n", "\n".join(str(grp) for grp in dedented))
     return dedented
 
@@ -155,7 +155,7 @@ def y_coordinate_groups(groups: list[CharGroup]) -> dict[int, list[CharGroup]]:
         else:
             last_ty = ty
             last_txs = txs
-    if logger.getEffectiveLevel() <= logging.DEBUG:
+    if logger.getEffectiveLevel() == logging.DEBUG:
         logger.debug(
             "**** Y COORDINATE GROUPS ****\n----- %s\n",
             "\n----- ".join(
