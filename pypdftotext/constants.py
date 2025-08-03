@@ -1,8 +1,7 @@
 """Global constants for pypdftotext package"""
 
 import os
-from collections.abc import Callable
-from typing import Any
+
 
 AZURE_DOCINTEL_ENDPOINT: str = os.getenv("AZURE_DOCINTEL_ENDPOINT", "")
 """The API endpoint of your Azure Document Intelligence instance. Defaults to
@@ -24,11 +23,18 @@ FONT_HEIGHT_WEIGHT: float = 1.0
 and preserved vertical whitespace in fixed width embedded text output.
 NOTE: Higher values result in fewer blank lines but increase the
 likelihood of triggering a split due to font height based y offsets."""
-OCR_FONT_SIZE_MULT: int = 50
+OCR_LINE_HEIGHT_SCALE: int = 50
 """Factor between 0 and 100 for adjusting line splitting behaviors
 and preserved vertical whitespace in fixed width OCR text output.
 NOTE: Higher values result in fewer blank lines but increase the
 likelihood of triggering a split due to font height based y offsets."""
+OCR_POSITIONING_SCALE: int = 100
+"""The factor by which to upscale the coordinates reported in the
+Azure OCR response when constructing the fixed width layout. Lower
+values result in less spacing and increase the likelihood of combining
+independently reported text fragments onto a single line. Tread with
+caution when messing with this one. Also impacts OCR_LINE_HEIGHT_SCALE
+behavior."""
 PRESERVE_VERTICAL_WHITESPACE: bool = False
 """If False (default), no blank lines will be present in the extracted
 text. If True, blank lines are inserted whenever the nominal font height
@@ -60,8 +66,3 @@ is available, all pages will be OCR'd by default."""
 OCR_HANDWRITTEN_CONFIDENCE_LIMIT: float = 0.8
 """Azure must be at least this confident that a given span is handwritten
 in order for it to count when determining handwritten character percentage."""
-
-
-log: Callable[[Any], Any] = print
-"""Allow callers to override simple `print` logging with a custom
-logging function."""

@@ -1,16 +1,19 @@
 """Extract text from pdf pages from codebehind or Azure OCR as required"""
 
-__version__ = "0.0.8"
+__version__ = "0.0.9"
 
 import io
 import json
+import logging
 from pathlib import Path
 
 from pypdf import PdfReader, PageObject
 from tqdm import tqdm
 
-from . import constants
+from . import constants, layout
 from .azure_docintel_integrator import AZURE_READ
+
+logger = logging.getLogger(__name__)
 
 
 def pdf_text_pages(
@@ -30,7 +33,7 @@ def pdf_text_pages(
     Args:
         pdf_reader (PdfReader | io.BytesIO | bytes): Pdf with pages to extract
             as an already instantiated PdfReader or the raw pdf bytes or BytesIO.
-        debug_path (Path | None, optional): Path to write debug files to.
+        debug_path (Path | None, optional): Path to write pypdf debug files to.
             Defaults to None.
         page_indices (list[int] | None): if provided, only extract text from
             the listed page indices. Default is None (extract all pages).
@@ -65,6 +68,8 @@ def pdf_text_pages(
         suppress_embedded_text (bool): if true, embedded text extraction will not
             be attempted. Assuming OCR is available, all pages will be OCR'd by
             default. Defaults to `constants.SUPPRESS_EMBEDDED_TEXT`, aka False.
+        pbar_position (int): if supplied and constants.DISABLE_PROGRESS_BAR is
+            False, set the postition argument of all tqdm objects to this value.
 
     Returns:
         list[str]: a string of text extracted for each page
@@ -84,8 +89,12 @@ def pdf_text_pages(
     )
     scale_weight = kwargs.pop("scale_weight", constants.SCALE_WEIGHT)
     suppress_embedded_text = kwargs.pop("suppress_embedded_text", constants.SUPPRESS_EMBEDDED_TEXT)
+    pbar_position = AZURE_READ.pbar_position = kwargs.pop("pbar_position", None)
+    if pbar_position and not isinstance(pbar_position, int):
+        pbar_position = None
+        AZURE_READ.pbar_position = None
     if kwargs:
-        constants.log(f"Unrecognized extract text kwargs {kwargs.keys()!r}.")
+        logger.warning("Unrecognized extract text kwargs: %s", list(kwargs))
     assert isinstance(pdf_reader.stream, io.BytesIO)
     AZURE_READ.reset()
     pdf_pbar = tqdm(
@@ -94,9 +103,10 @@ def pdf_text_pages(
             for i, pg in enumerate(pdf_reader.pages)
             if page_indices is None or i in page_indices
         ),
-        disable=constants.DISABLE_PROGRESS_BAR,
         desc="Extracting text",
         total=len(page_indices or pdf_reader.pages),
+        disable=constants.DISABLE_PROGRESS_BAR,
+        position=pbar_position,
     )
     corruption_detected = False
 
@@ -122,34 +132,36 @@ def pdf_text_pages(
         if len(txt) > constants.MAX_CHARS_PER_PDF_PAGE:
             corruption_detected = True
             pdf_pbar.set_postfix_str("!!! CORRUPTION DETECTED !!!")
-            constants.log(
-                f"Clearing corrupt pdf text {pg_idx=};"
-                f" {len(txt)=} > {constants.MAX_CHARS_PER_PDF_PAGE} char limit.",
+            logger.warning(
+                "Clearing corrupt pdf text pg_idx=%s; len(txt)=%s > %s char limit.",
+                pg_idx,
+                len(txt),
+                constants.MAX_CHARS_PER_PDF_PAGE,
             )
             txt = ""
+        # this originally compared `len(txt.splitlines())` which was
+        # VERY inefficient. The + 1 below preserves the original
+        # behavior for the `min_lines_ocr_trigger` parameter
+        line_count_less_than_ocr_trigger = txt.count("\n") + 1 <= min_lines_ocr_trigger
         if (  # auto client is enabled and this one needs to OCR, so...
             AZURE_READ.client is None
             and constants.AZURE_DOCINTEL_AUTO_CLIENT
-            # this originally compared `len(txt.splitlines())` which was
-            # VERY inefficient. The + 1 below preserves the original
-            # behavior for the `min_lines_ocr_trigger` parameter
-            and txt.count("\n") + 1 <= min_lines_ocr_trigger
+            and line_count_less_than_ocr_trigger
         ):
             AZURE_READ.create_client()  # ... create the client.
         if constants.DISABLE_OCR or AZURE_READ.client is None:
             return txt
         # add as an OCR candidate if page has too few lines. See + 1 comment above.
-        if txt.count("\n") + 1 <= min_lines_ocr_trigger:
+        if line_count_less_than_ocr_trigger:
             return pg_idx
         return txt
 
     pre_ocr = [_page_text(page, page_index) for page_index, page in pdf_pbar]
     result = [v if isinstance(v, str) else "" for v in pre_ocr]
+    ocr_page_idxs = [itm for itm in pre_ocr if isinstance(itm, int)]
     # do not OCR unless the number of pages requiring OCR / total pages exceeds a target ratio.
-    if (
-        len(ocr_page_idxs := [itm for itm in pre_ocr if isinstance(itm, int)]) / len(result)
-    ) >= trigger_ocr_page_ratio:
-        ocr_pages = AZURE_READ.ocr_pages(pdf_reader.stream.getvalue(), ocr_page_idxs, debug_path)
+    if len(ocr_page_idxs) / len(result) >= trigger_ocr_page_ratio:
+        ocr_pages = AZURE_READ.ocr_pages(pdf_reader.stream.getvalue(), ocr_page_idxs)
         if debug_path:
             debug_path.joinpath("ocr_pages.json").write_text(
                 json.dumps(ocr_pages, indent=2, default=str), "utf-8"
@@ -157,9 +169,12 @@ def pdf_text_pages(
         for ocr_idx, og_pg_idx in enumerate(ocr_page_idxs):
             txt = ocr_pages[ocr_idx]
             if len(txt) > constants.MAX_CHARS_PER_PDF_PAGE:
-                constants.log(
-                    f"Clearing OCR text. {len(txt)=} exceeds {constants.MAX_CHARS_PER_PDF_PAGE}"
-                    " char limit. Does page contain rotated text?",
+                logger.warning(
+                    "Clearing corrupt OCR text pg_idx=%s; len(txt)=%s > %s char limit."
+                    " Does page contain multiple text orientations?",
+                    og_pg_idx,
+                    len(txt),
+                    constants.MAX_CHARS_PER_PDF_PAGE,
                 )
                 txt = ""
             repl_idx = og_pg_idx if page_indices is None else page_indices.index(og_pg_idx)
@@ -168,13 +183,11 @@ def pdf_text_pages(
     # perform byte code substitutions per 'replace_byte_codes' arg
     if replace_byte_codes:
         for idx, txt in enumerate(result):
-            if txt:
-                byts = txt.encode()
-                for old_bytes, new_bytes in replace_byte_codes.items():
-                    byts = byts.replace(old_bytes, new_bytes)
-                result[idx] = byts.decode()
+            for old_bytes, new_bytes in replace_byte_codes.items():
+                txt = txt.replace(old_bytes.decode(), new_bytes.decode())
+            result[idx] = txt
 
-    constants.log("Text extraction complete...")
+    logger.info("Text extraction complete.")
     return result
 
 
@@ -195,7 +208,7 @@ def pdf_text_page_lines(
     Args:
         pdf_reader (PdfReader | io.BytesIO | bytes): Pdf with pages to extract
             as an already instantiated PdfReader or the raw pdf bytes or BytesIO.
-        debug_path (Path | None, optional): Path to write debug files to.
+        debug_path (Path | None, optional): Path to write pypdf debug files to.
             Defaults to None.
         page_indices (list[int] | None): if provided, only extract text from
             the listed page indices. Default is None (extract all pages).
@@ -242,4 +255,31 @@ def pdf_text_page_lines(
     ]
 
 
-__all__ = ["constants", "AZURE_READ", "pdf_text_pages", "pdf_text_page_lines"]
+def handwritten_ratio(
+    page_index: int,
+    handwritten_confidence_limit: float | None = None,
+) -> float:
+    """
+    Given a page *index*, returns the ratio of handwritten to total characters on the page.
+
+    Args:
+        page_index: the 0-based index of the page to analyze
+        handwritten_confidence_limit: the spans of handwritten styles with confidences
+            less than this limit will not be considered. Defaults to
+            constants.OCR_HANDWRITTEN_CONFIDENCE_LIMIT.
+
+    Returns:
+        float: 0.0 if the supplied page index was not OCR'd or of length 0.0. Otherwise
+        the ratio of the sum of all handwritten spans on the page to the total page span.
+    """
+    return AZURE_READ.handwritten_ratio(page_index, handwritten_confidence_limit)
+
+
+__all__ = [
+    "constants",
+    "layout",
+    "AZURE_READ",
+    "handwritten_ratio",
+    "pdf_text_pages",
+    "pdf_text_page_lines",
+]
