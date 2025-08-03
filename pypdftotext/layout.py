@@ -38,8 +38,8 @@ def rotated_bbox(line: DocumentLine, page: DocumentPage) -> list[float]:
 
     def _rotate_point(x: float, y: float) -> tuple[float, float]:
         return (
-            _cos * (x - width / 2) - _sin * (y - height / 2) + height / 2,
-            _sin * (x - width / 2) + _cos * (y - height / 2) + width / 2,
+            _cos * (x - width / 2) - _sin * (y - height / 2) + width / 2,
+            _sin * (x - width / 2) + _cos * (y - height / 2) + height / 2,
         )
 
     return [
