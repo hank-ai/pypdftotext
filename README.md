@@ -2,7 +2,7 @@
 
 *An OCR enabled structured text extraction extension for pypdf.*
 
-Returns the text of a pdf in from pypdf's "layout mode". If no text is found, optionally submit the PDF for OCR via Azure Document Intelligence.
+Returns the text of a pdf from pypdf's "layout mode". If no text is found, optionally submit the PDF for OCR via Azure Document Intelligence.
 
 ## Dependencies
 
