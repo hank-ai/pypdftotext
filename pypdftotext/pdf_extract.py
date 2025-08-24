@@ -397,12 +397,12 @@ class PdfExtract:
         Returns:
             bytes: the new pdf
         """
+        if isinstance(page_indices, tuple):
+            page_indices = list(range(page_indices[0], page_indices[1] + 1))
         pdf_writer = PdfWriter()
         pdf_writer.append(self.reader, pages=page_indices)
         ootb_bytesio = io.BytesIO()
         pdf_writer.write(ootb_bytesio)
-        if isinstance(page_indices, tuple):
-            page_indices = list(range(page_indices[0], page_indices[1] + 1))
         # Optimize storage size and prevent possible 'bleed through' of xobject data.
         xobjs: list[DictionaryObject] = []
         xobj_pages: list[list[int]] = []

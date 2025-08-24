@@ -5,7 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Project Overview
 
 pypdftotext is a Python package that provides OCR-enabled structured text extraction for PDF files. It's an extension for pypdf that:
-- Extracts text from PDFs using pypdf's "layout mode" 
+- Extracts text from PDFs using pypdf's "layout mode"
 - Falls back to Azure Document Intelligence OCR when no text is found
 - Handles various PDF complexities like custom glyphs and page corruptions
 - Supports batch OCR processing for efficiency
@@ -75,7 +75,7 @@ The project uses the following tools via VS Code extensions (configured in `.dev
 - **Black**: Code formatter that runs automatically on save
   - Configured as the default formatter
   - Ensures consistent code style across the project
-  
+
 - **Pylint**: Linter that runs automatically on save
   - Configuration: `--load-plugins=pylint_pydantic --disable=W0311,R0903,C0301,C0302,W1203`
   - Disabled rules:
@@ -84,7 +84,7 @@ The project uses the following tools via VS Code extensions (configured in `.dev
     - C0301: Line too long
     - C0302: Too many lines in module
     - W1203: Use % formatting in logging functions
-  
+
 - **Pyright/Pylance**: Type checker that runs in real-time
   - Mode: `standard` type checking
   - Provides immediate feedback on type issues as you code
@@ -101,7 +101,7 @@ When writing code, ensure it passes all three tools:
 
 1. **Main API** (`pypdftotext/__init__.py`):
    - `pdf_text_pages()`: Primary function that extracts text from PDF pages
-   - `pdf_text_page_lines()`: Returns text as list of lines per page  
+   - `pdf_text_page_lines()`: Returns text as list of lines per page
    - `handwritten_ratio()`: Calculates ratio of handwritten to total characters on OCR'd pages
    - Handles PDF reading from bytes, BytesIO, or PdfReader objects
    - Implements intelligent OCR triggering based on extracted text quality
@@ -164,7 +164,7 @@ When writing code, ensure it passes all three tools:
 - `AWS_SECRET_ACCESS_KEY`: AWS secret key
 - `AWS_SESSION_TOKEN`: Optional session token for temporary credentials
 
-These can also be set programmatically via the `constants` module after import.
+These can also be set programmatically after import via the `constants` global settings or a `PdfToTextConfig` instance.
 
 ## Important Implementation Details
 
@@ -193,8 +193,7 @@ These can also be set programmatically via the `constants` module after import.
 
 ## Code Style Guidelines
 
-- **ALWAYS run Black formatter before writing any Python (.py) file to disk** - no exceptions
-- Use type hints for all APIs
+- Use type hints for all public APIs
 - Follow existing patterns for dataclasses and configuration
 - Log errors and warnings using Python's `logging` module
 - Maintain backward compatibility when modifying public APIs
