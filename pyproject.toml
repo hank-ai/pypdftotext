@@ -16,8 +16,33 @@ classifiers = [
   "License :: OSI Approved :: MIT License",
   "Operating System :: OS Independent",
 ]
-dependencies = ["pypdf ==5.2", "tqdm", "azure-ai-documentintelligence ==1.0.1"]
+dependencies = ["pypdf==6.0", "tqdm", "azure-ai-documentintelligence>=1.0.0"]
+
+[project.optional-dependencies]
+s3 = ["boto3"]
+image = ["pillow>=8.0.0"]
+full = ["boto3", "pillow>=8.0.0"]
+dev = ["boto3", "pillow>=8.0.0", "boto3-stubs[s3]", "pytest>=7.0.0", "pytest-cov>=4.0.0"]
 
 [project.urls]
 Home = "https://github.com/hank-ai/pypdftotext"
 Issues = "https://github.com/hank-ai/pypdftotext/issues"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "-v",
+    "--strict-markers",
+    "--tb=short",
+    "--cov=pypdftotext",
+    "--cov-report=term-missing",
+    "--cov-report=html",
+]
+markers = [
+    "unit: Unit tests",
+    "integration: Integration tests",
+    "slow: Slow tests",
+]
