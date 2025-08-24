@@ -1,3 +1,7 @@
+# ********* BEGIN USER EDITS ********* #
+scratch.txt
+# *********  END USER EDITS  ********* #
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

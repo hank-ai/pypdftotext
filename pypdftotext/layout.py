@@ -6,12 +6,16 @@ from itertools import groupby
 
 from azure.ai.documentintelligence.models import DocumentLine, DocumentPage
 
-from . import constants
+from ._config import constants, PyPdfToTextConfig
 
 logger = logging.getLogger(__name__)
 
 
-def rotated_bbox(line: DocumentLine, page: DocumentPage) -> list[float]:
+def rotated_bbox(
+    line: DocumentLine,
+    page: DocumentPage,
+    min_ocr_rotation_degrees: float = constants.MIN_OCR_ROTATION_DEGREES,
+) -> list[float]:
     """
     Rotate the bounding box for the line according to the angle of rotation
     reported for the page.
@@ -19,14 +23,34 @@ def rotated_bbox(line: DocumentLine, page: DocumentPage) -> list[float]:
     Args:
         line: an Azure DocumentLine instance
         page: an Azure DocumentPage instance
+        min_ocr_rotation_degrees: min reported rotation to apply.
 
     Returns:
         list[float]: list of 8 floats corresponding to the coordinates of the
             corners of the bounded region.
+
+    Examples:
+        >>> from azure.ai.documentintelligence.models import DocumentLine, DocumentPage
+        >>> # Create a line with a bounding box at corners (1,2), (3,2), (3,3), (1,3)
+        >>> line = DocumentLine(polygon=[1.0, 2.0, 3.0, 2.0, 3.0, 3.0, 1.0, 3.0])
+        >>> # Page with no rotation
+        >>> page = DocumentPage(page_number=1, angle=0.0, width=8.5, height=11.0)
+        >>> rotated_bbox(line, page, min_ocr_rotation_degrees=5.0)
+        [1.0, 2.0, 3.0, 2.0, 3.0, 3.0, 1.0, 3.0]
+        >>> # Page with small rotation (below threshold)
+        >>> page_small = DocumentPage(page_number=1, angle=3.0, width=8.5, height=11.0)
+        >>> rotated_bbox(line, page_small, min_ocr_rotation_degrees=5.0)
+        [1.0, 2.0, 3.0, 2.0, 3.0, 3.0, 1.0, 3.0]
+        >>> # Page rotated 90 degrees (simulating a page that needs correction)
+        >>> page_rotated = DocumentPage(page_number=1, angle=90.0, width=8.5, height=11.0)
+        >>> result = rotated_bbox(line, page_rotated, min_ocr_rotation_degrees=5.0)
+        >>> # Verify rotation occurred (values will differ from original)
+        >>> result != [1.0, 2.0, 3.0, 2.0, 3.0, 3.0, 1.0, 3.0]
+        True
     """
     if line.polygon is None:
         raise ValueError(f"Bad Azure DocumentLine: polygon is None for {line=}")
-    if page.angle is None or abs(page.angle) < constants.MIN_OCR_ROTATION_DEGREES:
+    if page.angle is None or abs(page.angle) < min_ocr_rotation_degrees:
         return line.polygon
     # We're *reversing* the reported angle, so convert as `-angle`
     angle = math.radians(-page.angle)
@@ -63,27 +87,33 @@ class CharGroup:
     behaviors when page.angle is large. This can be adjusted via the
     font_mult parameter or globally via constants.OCR_FONT_SIZE_MULT.
 
-    Keys:
-        tx: x coordinate of first character in CharGroup
-        ty: y coordinate of first character in CharGroup
-        font_height: effective font height
-        text: rendered text
-        displaced_tx: x coordinate of last character in CharGroup
-        flip_sort: -1 if page is upside down, else 1
+    Args:
+        line: an Azure DocumentLine instance
+        page: an Azure DocumentPage instance
+        config: a PyPdfToTextConfig instance. Defaults to global base config `constants`.
+
+    Attributes:
+        tx (float): x coordinate of first character in CharGroup
+        ty (float): y coordinate of first character in CharGroup
+        effective_height (float): effective bbox height
+        text (str): rendered text
+        displaced_tx (float): x coordinate of last character in CharGroup
     """
 
     def __init__(
-        self, line: DocumentLine, page: DocumentPage, font_mult: float | None = None
+        self,
+        line: DocumentLine,
+        page: DocumentPage,
+        config: PyPdfToTextConfig = constants,
     ) -> None:
         if line.polygon is None:
-            raise TypeError(f"Bad Azure DocumentLine: {line.polygon=!r}")
-        box_height_mult = font_mult or constants.OCR_LINE_HEIGHT_SCALE
-        bbox = rotated_bbox(line, page)
-        self.tx: float = bbox[0] * constants.OCR_POSITIONING_SCALE
-        self.ty: float = bbox[1] * constants.OCR_POSITIONING_SCALE
-        self.effective_height: float = (bbox[-1] - bbox[1]) * box_height_mult
+            raise ValueError(f"Bad Azure DocumentLine: {line.polygon=!r}")
+        bbox = rotated_bbox(line, page, config.MIN_OCR_ROTATION_DEGREES)
+        self.tx: float = bbox[0] * config.OCR_POSITIONING_SCALE
+        self.ty: float = bbox[1] * config.OCR_POSITIONING_SCALE
+        self.effective_height: float = (bbox[-1] - bbox[1]) * config.OCR_LINE_HEIGHT_SCALE
         self.text: str = line.content
-        self.displaced_tx: float = bbox[2] * constants.OCR_POSITIONING_SCALE
+        self.displaced_tx: float = bbox[2] * config.OCR_POSITIONING_SCALE
 
     def offset_x_coords(self, offset: float) -> "CharGroup":
         """Decrement self.tx and self.displaced_tx by the offset and return self."""
@@ -186,19 +216,14 @@ def fixed_char_width(groups: list[CharGroup], scale_weight: float = 1.25) -> flo
     return sum(_w * _l for _w, _l in char_widths) / sum(_l for _, _l in char_widths)
 
 
-def fixed_width_page(
-    page: DocumentPage,
-    space_vertically: bool,
-    font_height_weight: float,
-) -> str:
+def fixed_width_page(page: DocumentPage, config: PyPdfToTextConfig = constants) -> str:
     """
     Generate structured page text from a DocumentPage object in an Azure Document
     Intelligence response.
 
     Args:
         page: an Azure DocumentPage instance
-        space_vertically: include blank lines inferred from y distance + font height.
-        font_height_weight: multiplier for font height when calculating blank lines.
+        config: a PyPdfToTextConfig instance. Defaults to global base config `constants`.
 
     Returns:
         str: page text in a fixed width format that closely adheres to the rendered
@@ -208,19 +233,19 @@ def fixed_width_page(
     if not page.lines:
         return ""
     groups = dedented_groups(
-        [CharGroup(_line, page) for _line in page.lines or [] if _line.polygon is not None]
+        [CharGroup(_line, page, config) for _line in page.lines or [] if _line.polygon is not None]
     )
     ty_groups = y_coordinate_groups(groups)
     char_width = fixed_char_width(groups)
     lines: list[str] = []
     last_y_coord = 0
     for y_coord, line_data in ty_groups.items():
-        if space_vertically and lines:
+        if config.PRESERVE_VERTICAL_WHITESPACE and lines:
             fh = line_data[0].effective_height
             blank_lines = (
                 0
                 if fh == 0
-                else (int(abs(y_coord - last_y_coord) / (fh * font_height_weight)) - 1)
+                else (int(abs(y_coord - last_y_coord) / (fh * config.FONT_HEIGHT_WEIGHT)) - 1)
             )
             lines.extend([""] * blank_lines)
         line = ""
@@ -233,4 +258,6 @@ def fixed_width_page(
         if line.strip() or lines:
             lines.append("".join(c if ord(c) < 14 or ord(c) > 31 else " " for c in line))
         last_y_coord = y_coord
-    return "\n".join(ln.rstrip() for ln in lines if space_vertically or ln.strip())
+    return "\n".join(
+        ln.rstrip() for ln in lines if config.PRESERVE_VERTICAL_WHITESPACE or ln.strip()
+    )
