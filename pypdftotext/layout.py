@@ -81,31 +81,32 @@ class CharGroup:
     combined with proper spacing added according to x coordinate offsets
     during the `y_coordinate_groups` operation.
 
-    NOTE: This class scales up the native coordinate system by 100x for
-    better positioning performance. The effective height, however, is
-    only scaled by 50x by default to prevent improper line splitting
-    behaviors when page.angle is large. This can be adjusted via the
-    font_mult parameter or globally via constants.OCR_FONT_SIZE_MULT.
+    NOTE: This class scales coordinates using OCR_POSITIONING_SCALE (default: 100)
+    for x/y positioning and OCR_LINE_HEIGHT_SCALE (default: 50) for height
+    calculations. The different scaling factors help prevent improper line
+    splitting when pages have rotation angles.
 
     Args:
         line: an Azure DocumentLine instance
         page: an Azure DocumentPage instance
-        config: a PyPdfToTextConfig instance. Defaults to global base config `constants`.
+        config: a PyPdfToTextConfig instance inherits from global base config
+            `constants` by default. See PyPdfToTextConfig docstring for more info.
 
     Attributes:
         tx (float): x coordinate of first character in CharGroup
         ty (float): y coordinate of first character in CharGroup
         effective_height (float): effective bbox height
         text (str): rendered text
-        displaced_tx (float): x coordinate of last character in CharGroup
+        displaced_tx (float): x coordinate of the right edge of the CharGroup's bounding box
     """
 
     def __init__(
         self,
         line: DocumentLine,
         page: DocumentPage,
-        config: PyPdfToTextConfig = constants,
+        config: PyPdfToTextConfig | None = None,
     ) -> None:
+        config = config or PyPdfToTextConfig()
         if line.polygon is None:
             raise ValueError(f"Bad Azure DocumentLine: {line.polygon=!r}")
         bbox = rotated_bbox(line, page, config.MIN_OCR_ROTATION_DEGREES)
@@ -139,7 +140,8 @@ def dedented_groups(groups: list[CharGroup]) -> list[CharGroup]:
     of the page output.
 
     Returns:
-        list[CharGroup]: sorted by -ty, -
+        list[CharGroup]: sorted by y-coordinate (top to bottom) then x-coordinate (right to
+            left), with x-coordinates adjusted to align leftmost text to position 0
     """
     min_x = min((x.tx for x in groups), default=0.0)
     dedented = [
@@ -159,11 +161,11 @@ def y_coordinate_groups(groups: list[CharGroup]) -> dict[int, list[CharGroup]]:
     Group text operations by rendered y coordinate, i.e. the line number.
 
     Args:
-        groups: list of dicts as returned by text_show_operations()
+        groups: list of CharGroup instances as returned by dedented_groups()
 
     Returns:
-        dict[int, list[CharGroup]]: dict of lists of text found by Azure OCR
-            keyed by y coordinate
+        dict[int, list[CharGroup]]: dict mapping y-coordinate positions to lists of
+            CharGroup instances that appear on the same line
     """
     ty_groups = {
         ty: sorted(grp, key=lambda x: x.tx)
@@ -204,6 +206,8 @@ def fixed_char_width(groups: list[CharGroup], scale_weight: float = 1.25) -> flo
     Args:
         groups (list[CharGroup]): list of CharGroup instances created from
             the lines of an Azure OCR API response.
+        scale_weight (float, optional): Weight factor applied to text length when
+            calculating average character width. Default is 1.25.
 
     Returns:
         float: fixed character width
@@ -216,20 +220,22 @@ def fixed_char_width(groups: list[CharGroup], scale_weight: float = 1.25) -> flo
     return sum(_w * _l for _w, _l in char_widths) / sum(_l for _, _l in char_widths)
 
 
-def fixed_width_page(page: DocumentPage, config: PyPdfToTextConfig = constants) -> str:
+def fixed_width_page(page: DocumentPage, config: PyPdfToTextConfig | None = None) -> str:
     """
     Generate structured page text from a DocumentPage object in an Azure Document
     Intelligence response.
 
     Args:
         page: an Azure DocumentPage instance
-        config: a PyPdfToTextConfig instance. Defaults to global base config `constants`.
+        config: a PyPdfToTextConfig instance that inherits from the global base config
+            `constants` by default. See PyPdfToTextConfig docstring for more info.
 
     Returns:
         str: page text in a fixed width format that closely adheres to the rendered
             layout in the source pdf.
 
     """
+    config = config or PyPdfToTextConfig()
     if not page.lines:
         return ""
     groups = dedented_groups(

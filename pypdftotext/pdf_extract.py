@@ -1,4 +1,4 @@
-"""Implement the PdfToText class"""
+"""PDF text extraction with OCR fallback and page manipulation utilities."""
 
 from __future__ import annotations
 
@@ -10,23 +10,22 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, TYPE_CHECKING
 
+from azure.ai.documentintelligence.models import DocumentPage
 from pypdf import PdfReader, PdfWriter, PageObject
 from pypdf.generic import DictionaryObject, NullObject
 from tqdm import tqdm
 
-from ._config import constants, PyPdfToTextConfig, PyPdfToTextConfigOverrides
+from ._config import PyPdfToTextConfig, PyPdfToTextConfigOverrides
 from .azure_docintel_integrator import AzureDocIntelIntegrator
 
 
 try:
-    # pylint: disable=unused-import
     import boto3
 except ImportError:
     boto3 = None
 
 
 try:
-    # pylint: disable=unused-import
     from PIL import Image, ImageOps
 except ImportError:
     Image = None
@@ -41,11 +40,30 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
-class _ExtractedPage:
+class ExtractedPage:
+    """
+    Represents a single extracted page from a PDF with its metadata.
+
+    This dataclass encapsulates all information about a page after text extraction,
+    including the source of the text (embedded or OCR), handwritten content ratio,
+    and references to the underlying page objects.
+
+    Attributes:
+        page_obj: The pypdf PageObject instance for this page.
+        handwritten_ratio: Ratio of handwritten to total characters (0.0 to 1.0).
+            Always 0.0 for embedded text pages.
+        text: The extracted text content from the page.
+        source: Indicates whether text was extracted from embedded PDF content
+            ("embedded") or via OCR ("OCR").
+        azure_page: The Azure DocumentPage instance if this page was OCR'd,
+            None for embedded text pages.
+    """
+
     page_obj: PageObject
     handwritten_ratio: float
     text: str
     source: Literal["embedded", "OCR"] = "embedded"
+    azure_page: DocumentPage | None = None
 
 
 class PdfExtract:
@@ -58,7 +76,8 @@ class PdfExtract:
         pdf (str | Path | bytes | io.BytesIO | PdfReader): if str, check for s3
             download if boto3 is installed and value is an s3 uri (i.e. prefixed 's3://').
             otherwise attempt read from disk.
-        config (PyPdfToTextConfig): Optional. Defaults to global base config `constants`.
+        config: a PyPdfToTextConfig instance that inherits from the global base config
+            `constants` by default. See PyPdfToTextConfig docstring for more info.
 
     KwArgs:
         debug_path (Path | None, optional): Path to write pypdf debug files to.
@@ -66,13 +85,12 @@ class PdfExtract:
         replace_byte_codes (dict[bytes, bytes] | None): if supplied, raw
             text is cast to bytes, the dict keys are replaced with values,
             and resulting bytes are cast back to text. Used to replace custom
-            glyphs defined in PDFs w/ (roughtly) equivalent unicode charcters,
+            glyphs defined in PDFs w/ (roughly) equivalent unicode characters,
             e.g. 'anesthesia billing print set' checkbox handling.
-        init_extracted_pages (list[str]): initializes the internal self._extracted_pages
+        init_extracted_pages (list[ExtractedPage]): initializes the internal self._extracted_pages
             attribute to avoid re-extracting the same pages in child PDFs.
         compressed (bool): indicates that image compression has already been
             performed for the supplied Pdf.
-        azure (AzureDocIntelIntegrator): enables legacy global AZURE_READ behaviors.
     """
 
     def __init__(
@@ -81,13 +99,13 @@ class PdfExtract:
         config: PyPdfToTextConfig | None = None,
         **kwargs,
     ) -> None:
-        self.config: PyPdfToTextConfig = config or PyPdfToTextConfig(base=constants)
+        self.config = config or PyPdfToTextConfig()
         self.corruption_detected: bool = False
         self.body: bytes
         self.debug_path: Path | None = kwargs.get("debug_path")
         self.replace_byte_codes: dict[bytes, bytes] | None = kwargs.get("replace_byte_codes")
         self.compressed: bool = kwargs.get("compressed", False)
-        self._extracted_pages: list[_ExtractedPage] | None = kwargs.get("init_extracted_pages")
+        self._extracted_pages: list[ExtractedPage] | None = kwargs.get("init_extracted_pages")
         self._azure: AzureDocIntelIntegrator | None = kwargs.get("azure")
         self._reader: PdfReader | None = None
         self._writer: PdfWriter | None = None
@@ -118,10 +136,10 @@ class PdfExtract:
             self.body = self._reader.stream.getvalue()
 
     @property
-    def extracted_pages(self) -> list[_ExtractedPage]:
+    def extracted_pages(self) -> list[ExtractedPage]:
         """
-        A list of multiline strings containing a structured text representation
-        of each page in the source PDF.
+        A list of ExtractedPage objects containing text and metadata
+        for each page in the source PDF.
         """
         if not self._extracted_pages:
             self._extracted_pages = self._extract_pages()
@@ -136,13 +154,21 @@ class PdfExtract:
         return [ext_pg.text for ext_pg in self.extracted_pages]
 
     @property
+    def text_page_lines(self) -> list[list[str]]:
+        """
+        A list of lists of strings with each sublist containing the lines
+        in the structured text representation of each page from the source PDF.
+        """
+        return [ext_pg.text.splitlines() for ext_pg in self.extracted_pages]
+
+    @property
     def text(self) -> str:
         """Text extracted from all pages in a single string."""
         return "\n".join(ext_pg.text for ext_pg in self.extracted_pages)
 
     @property
     def reader(self) -> PdfReader:
-        """The PDF reader used for text extraction"""
+        """The PDF reader used for text extraction. **NOT THREAD SAFE.**"""
         if self._reader is None:
             logger.debug("Initializing PdfReader for PdfExtract")
             self._reader = PdfReader(io.BytesIO(self.body))
@@ -150,7 +176,8 @@ class PdfExtract:
 
     @property
     def writer(self) -> PdfWriter:
-        """The PDF writer used for image compression, child creation, and page rotations"""
+        """The PDF writer used for image compression, child creation,
+        and page rotations. **NOT THREAD SAFE.**"""
         if self._writer is None:
             logger.debug("Initializing PdfWriter for PdfExtract")
             if self._extracted_pages:
@@ -164,7 +191,7 @@ class PdfExtract:
 
     @property
     def s3(self) -> "S3Client":
-        """S3 client for this instance or None if boto3 is not installed."""
+        """S3 client for this instance. Raises ImportError if boto3 is not installed."""
         if boto3 is None:
             raise ImportError('boto3 not found. Run `pip install pypdftotext["s3"]`.')
         if not hasattr(self, "_s3"):
@@ -217,16 +244,16 @@ class PdfExtract:
             return pg_idx
         return txt
 
-    def _extract_pages(self) -> list[_ExtractedPage]:
+    def _extract_pages(self) -> list[ExtractedPage]:
         """
-        Extract text from PDF pages and return as a list of multiline strings.
+        Extract text from PDF pages and return as a list of ExtractedPage objects.
 
         Uses PDF code-behind by default. Triggers Azure OCR per config if the fraction
         of pages having fewer than `MIN_LINES_OCR_TRIGGER` lines is greater than
         or equal to `TRIGGER_OCR_PAGE_RATIO`.
 
         Returns:
-            list[_ExtractedPage]: a list of extacted pages
+            list[ExtractedPage]: a list of extracted pages
         """
 
         self._pbar = tqdm(
@@ -238,7 +265,7 @@ class PdfExtract:
         )
         pre_ocr = [self._embedded_text(page, page_index) for page_index, page in self._pbar]
         result = [
-            _ExtractedPage(pg, 0.0, txt if isinstance(txt, str) else "")
+            ExtractedPage(pg, 0.0, txt if isinstance(txt, str) else "")
             for txt, pg in zip(pre_ocr, self.reader.pages)
         ]
         ocr_page_idxs = [itm for itm in pre_ocr if isinstance(itm, int)]
@@ -271,6 +298,7 @@ class PdfExtract:
                 ext_pg.text = txt
                 ext_pg.source = "OCR"
                 ext_pg.handwritten_ratio = azure.handwritten_ratio(og_pg_idx)
+                ext_pg.azure_page = azure.page_at_index(og_pg_idx)
 
         # perform byte code substitutions per 'replace_byte_codes' arg
         if self.replace_byte_codes:
@@ -279,6 +307,8 @@ class PdfExtract:
                 for old_bytes, new_bytes in self.replace_byte_codes.items()
             ]
             for ext_pg in result:
+                if not ext_pg.text:
+                    continue
                 for old_, new_ in replacements:
                     ext_pg.text = ext_pg.text.replace(old_, new_)
 
@@ -291,7 +321,7 @@ class PdfExtract:
         logger.info("Text extraction complete.")
         return result
 
-    def child_pdf(
+    def child(
         self,
         page_indices: list[int] | tuple[int, int] | None = None,
         config_overrides: PyPdfToTextConfigOverrides | None = None,
@@ -304,7 +334,7 @@ class PdfExtract:
             page_indices (list[int] | tuple[int, int] | None): a list of 0-based page indices
                 OR a tuple of start page index, stop page index (inclusive) to include. If
                 None (default), all pages are included in the child.
-            config_overrides (PyPdfToTextConfigOverrides): settings to override in the
+            config_overrides (PyPdfToTextConfigOverrides | None): settings to override in the
                 child instance.
 
         Returns:
@@ -336,8 +366,8 @@ class PdfExtract:
         area of the PDF.
 
         Args:
-            white_point: pixel values greater than this are set to white, aka 256, after
-                casting to grey scale. Reduces noise for a sharper image. Values > 256
+            white_point: pixel values greater than this are set to white (255) after
+                casting to grey scale. Reduces noise for a sharper image. Values >= 256
                 effectively disable denoising.
             max_overscale: the width of the image must be > max_overscale * page width
                 for downsampling. the scale factor of the downsampled image is set to
@@ -472,7 +502,7 @@ class PdfExtract:
             handwritten_confidence_limit: deprecated. use config.OCR_HANDWRITTEN_CONFIDENCE_LIMIT
 
         Returns:
-            float: 0.0 if the supplied page index was not OCR'd or of length 0.0. Otherwise
+            float: 0.0 if the supplied page index was not OCR'd or has no text. Otherwise
             the ratio of the sum of all handwritten spans on the page to the total page span.
         """
         if handwritten_confidence_limit is not None:

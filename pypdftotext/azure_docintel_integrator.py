@@ -6,12 +6,12 @@ import os
 from dataclasses import dataclass, field
 
 from azure.ai.documentintelligence import DocumentIntelligenceClient, AnalyzeDocumentLROPoller
-from azure.ai.documentintelligence.models import AnalyzeResult
+from azure.ai.documentintelligence.models import AnalyzeResult, DocumentPage
 from azure.core.credentials import AzureKeyCredential
 from tqdm import tqdm
 
 from . import layout
-from ._config import constants, PyPdfToTextConfig
+from ._config import PyPdfToTextConfig
 
 
 logger = logging.getLogger(__name__)
@@ -23,7 +23,7 @@ class AzureDocIntelIntegrator:
     Extract text from pdf images via calls to Azure Document Intelligence OCR API.
     """
 
-    config: PyPdfToTextConfig = field(default_factory=lambda: PyPdfToTextConfig(base=constants))
+    config: PyPdfToTextConfig = field(default_factory=PyPdfToTextConfig)
     client: DocumentIntelligenceClient | None = field(default=None, init=False, repr=False)
     last_result: AnalyzeResult = field(default_factory=lambda: AnalyzeResult({}), init=False)
 
@@ -56,7 +56,7 @@ class AzureDocIntelIntegrator:
         return False
 
     def reset(self):
-        """Clear last_result and last_page_list from previous run."""
+        """Clear last_result from previous run."""
         self.last_result = AnalyzeResult({})
 
     def ocr_pages(self, pdf: bytes, pages: list[int]) -> list[str]:
@@ -75,7 +75,7 @@ class AzureDocIntelIntegrator:
             self.create_client()
         if self.client is None:
             logger.error(
-                "Azure OCR API not available. Did you create a client? Returning empty string."
+                "Azure OCR API not available. Did you create a client? Returning empty list."
             )
             return []
         assert self.client is not None
@@ -112,7 +112,7 @@ class AzureDocIntelIntegrator:
             handwritten_confidence_limit: deprecated. use config.OCR_HANDWRITTEN_CONFIDENCE_LIMIT
 
         Returns:
-            float: 0.0 if the supplied page index was not OCR'd or of length 0. Otherwise
+            float: 0.0 if the supplied page index was not OCR'd or has no text. Otherwise
             the ratio of the sum of all handwritten spans on the page to the total page span.
         """
         if handwritten_confidence_limit is not None:
@@ -124,11 +124,8 @@ class AzureDocIntelIntegrator:
                 handwritten_confidence_limit,
                 self.config.OCR_HANDWRITTEN_CONFIDENCE_LIMIT,
             )
-        if any(
-            # find the page at the supplied index. otherwise return 0.0 (final return below)
-            (_selected_page := page).page_number == page_index + 1
-            for page in self.last_result.pages
-        ):
+
+        if _selected_page := self.page_at_index(page_index):
             # a page should only have one span, but we'll treat as if there could be more
             # just in case. Get the min offset from all spans as the start and the max
             # offset + length as the page end.
@@ -179,16 +176,31 @@ class AzureDocIntelIntegrator:
             float: 0.0 if the supplied page index was not OCR'd. Otherwise
                 the page's reported rotation in degrees.
         """
-        if any(
-            # find the page at the supplied index and report its angle. otherwise return 0.0.
-            (_selected_page := page).page_number == page_index + 1
-            for page in self.last_result.pages
-        ):
+        if _selected_page := self.page_at_index(page_index):
             angle = _selected_page.angle or 0.0
             if abs(angle) > self.config.MIN_OCR_ROTATION_DEGREES:
                 logger.debug("Page at index %s is rotated %.2f degrees", page_index, angle)
                 return angle
         return 0.0
+
+    def page_at_index(self, page_index: int) -> DocumentPage | None:
+        """
+        Returns the DocumentPage instance having the given page *index* or None.
+
+        Args:
+            page_index: the 0-based index of the page to analyze
+
+        Returns:
+            DocumentPage | None: None if the supplied page index was not OCR'd.
+        """
+        if any(
+            # find the page at the supplied index and report its angle. otherwise return 0.0.
+            (_selected_page := page).page_number == page_index + 1
+            for page in self.last_result.pages
+        ):
+            return _selected_page
+        # page was not OCR'd. Return None.
+        return None
 
 
 AZURE_READ = AzureDocIntelIntegrator()

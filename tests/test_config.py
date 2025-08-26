@@ -100,25 +100,3 @@ class TestPyPdfToTextConfig:
 
         # Invalid field isn't set as attribute
         assert not hasattr(config, "INVALID_FIELD")
-
-    @pytest.mark.unit
-    def test_field_default_vs_base_inheritance(self):
-        """Test that base values override defaults even when they match default values."""
-        # Create base with explicit values that match defaults
-        base_config = PyPdfToTextConfig()
-        base_config.MIN_LINES_OCR_TRIGGER = 1  # Same as default
-        base_config.DISABLE_OCR = False  # Same as default
-
-        # Now change a default and create derived
-        base_config.SCALE_WEIGHT = 2.0  # Different from default
-
-        derived_config = PyPdfToTextConfig(
-            base=base_config, MIN_LINES_OCR_TRIGGER=2, DISABLE_OCR=True
-        )
-
-        # Should inherit the changed value
-        assert derived_config.SCALE_WEIGHT == 2.0
-
-        # Should not be overwritten by values from base_config
-        assert derived_config.MIN_LINES_OCR_TRIGGER == 2
-        assert derived_config.DISABLE_OCR is True

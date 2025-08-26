@@ -52,16 +52,14 @@ def pdf_text_pages(
         list[str]: a string of text extracted for each page
     """
     config = PyPdfToTextConfig(
-        base=constants,
         overrides=PyPdfToTextConfigOverrides(
-            {
+            **{
                 _upper: kwargs.pop(k)
                 for k in list(kwargs.keys())
                 if hasattr(constants, _upper := k.upper())
             }
         ),
     )
-    AZURE_READ.config = config
     pdf_extract = PdfExtract(
         pdf_reader,
         config,

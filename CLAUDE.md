@@ -115,7 +115,7 @@ When writing code, ensure it passes all three tools:
 
 3. **PDF Extraction Engine** (`pdf_extract.py`):
    - `PdfExtract` class orchestrates the entire extraction workflow
-   - `_ExtractedPage` dataclass tracks page metadata and source (embedded/OCR)
+   - `ExtractedPage` dataclass tracks page metadata and source (embedded/OCR)
    - Manages page-by-page extraction with progress tracking
    - Handles S3 PDF retrieval when boto3 is available
    - Implements corruption detection and recovery

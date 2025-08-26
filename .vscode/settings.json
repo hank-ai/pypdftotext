@@ -3,6 +3,6 @@
     "pylint.args": [
         "--disable=W0311,R0903,C0301,C0302,W1203"
     ],
-    "python.analysis.typeCheckingMode": "off",
+    "python.analysis.typeCheckingMode": "standard",
     "editor.formatOnSave": true
 }

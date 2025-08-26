@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 import os
-from dataclasses import dataclass, InitVar, field, fields
-from typing import Any, TypedDict
+from dataclasses import dataclass, InitVar, field
+from typing import cast, Any, TypedDict
+
+
+logger = logging.getLogger(__name__)
 
 
 class PyPdfToTextConfigOverrides(TypedDict, total=False):
@@ -13,6 +17,7 @@ class PyPdfToTextConfigOverrides(TypedDict, total=False):
     `overrides` InitVar.
     """
 
+    INHERIT_CONSTANTS: bool
     AZURE_DOCINTEL_ENDPOINT: str
     AZURE_DOCINTEL_SUBSCRIPTION_KEY: str
     AZURE_DOCINTEL_AUTO_CLIENT: bool
@@ -37,23 +42,28 @@ class PyPdfToTextConfigOverrides(TypedDict, total=False):
 
 
 @dataclass(kw_only=True)
-class PyPdfToTextConfig:
-    """Package wide constants for pypdftotext"""
+class _ConfigMixIn:
+    """
+    Package wide constants for pypdftotext.
+    """
 
     # pylint: disable=invalid-name
-    base: InitVar[PyPdfToTextConfig | None] = None
-    overrides: InitVar[PyPdfToTextConfigOverrides | None] = None
-    """A base instance to use as a starting point for initialization. Optional."""
+    _setattrs_: set[str] = field(default_factory=set, init=False)
+    _initialized_: bool = field(default=False, init=False)
+    INHERIT_CONSTANTS: bool = True
+    """If True (default), values set for the package-wide constants (set via
+    pypdftotext.constants.<ATTRIBUTE> = <VALUE>) are inherited by all subsequent
+    `PyPdfToTextConfig` instances *by default*."""
     AZURE_DOCINTEL_ENDPOINT: str = field(
         default_factory=lambda: os.getenv("AZURE_DOCINTEL_ENDPOINT", "")
     )
     """The API endpoint of your Azure Document Intelligence instance. Defaults to
-    the value of the Env Var of the same name or an empty string."""
+    the value of the environment variable of the same name or an empty string."""
     AZURE_DOCINTEL_SUBSCRIPTION_KEY: str = field(
         default_factory=lambda: os.getenv("AZURE_DOCINTEL_SUBSCRIPTION_KEY", "")
     )
     """The API key for your Azure Document Intelligence instance. Defaults to
-    the value of the Env Var of the same name or an empty string."""
+    the value of the environment variable of the same name or an empty string."""
     AZURE_DOCINTEL_AUTO_CLIENT: bool = True
     """If True (default), the Azure Read OCR client is created automatically
     upon first use."""
@@ -97,7 +107,7 @@ class PyPdfToTextConfig:
     the value and report an empty string."""
     MIN_LINES_OCR_TRIGGER: int = 1
     """A page is marked for OCR if it contains fewer lines in its extracted
-    code behind text. OCR only proceeds if a sufficient fraction of the
+    embedded text. OCR only proceeds if a sufficient fraction of the
     total PDF pages have been marked (see `TRIGGER_OCR_PAGE_RATIO`)."""
     TRIGGER_OCR_PAGE_RATIO: float = 0.99
     """OCR will proceed if and only if the fraction of pages with fewer than
@@ -127,26 +137,145 @@ class PyPdfToTextConfig:
     """AWS session token for the credentials that will be used to pull source
     PDFs from S3 if installed with "s3" extra (`pip install pypdftotext["s3"]`)"""
 
-    def __post_init__(
+    def __post_init__(self):
+        self._initialized_ = True
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        if self._initialized_ and not name.startswith("_"):  # don't capture internal attrs
+            self._setattrs_.add(name)
+        return super().__setattr__(name, value)
+
+
+class _PyPdfToTextConstants(_ConfigMixIn):
+    """
+    Package wide constants for pypdftotext.
+    """
+
+    _instance = None
+
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+
+    def __init__(self, **kwargs):
+        # Only initialize once
+        if not hasattr(self, "_initialized_") or not self._initialized_:
+            super().__init__(**kwargs)
+
+
+constants = _PyPdfToTextConstants()
+
+
+@dataclass(kw_only=True)
+class PyPdfToTextConfig(_ConfigMixIn):
+    """
+    Allows behaviors driven by pypdftotext.constants members to be customized
+    on a per PdfExtract basis with minimal hassle.
+
+    Features:
+     1. New instances will inherit any setting that has been set programmatically in
+        `constants`. Environment variables are re-read on instance creation.
+        This allows users to globally set API keys (via env OR `constants`) and other
+        desired behaviors (via `constants` only) eliminating the need to supply the
+        `config` parameter to every PdfExtract instantiation. I.e. if `config` is not
+        defined, a new one that inherits from `constants` / env vars as described
+        is created on the fly.
+     2. Inheritance from the global constants can be disabled globally by setting
+        `constants.INHERIT_CONSTANTS` to False or for a single PyPdfToTextConfig
+        instance using the `overrides` parameter:
+            `PyPdfToTextConfig(overrides={"INHERIT_CONSTANTS": False})`
+        The TypedDict implementation `PdfToTextConfigOverrides` is defined above
+        to provide IDE and typing support for the `overrides` parameter.
+     3. If a `base` is supplied, its values supersede global constants.
+     4. If both a 'base' and 'overrides' are supplied, `overrides` supersede `base`.
+     5. You can also manipulate the configs of individual `PdfExtract` and
+        `AzureDocIntelIntegrator` instances after creating them:
+        ```
+        extract = PdfExtract("file.pdf")
+        extract.config.<SETTING> = <VALUE>
+        # Anything set here ^^ (e.g. an API key) will be applied _before_
+        # extraction operations (like OCR).
+        for page_text in extract.text_pages:  # triggers extraction/OCR
+            ...
+        ```
+
+    Examples:
+        >>> import os
+        >>> from pypdftotext._config import PyPdfToTextConfig, constants
+
+        >>> # Example 1: New instances inherit from constants by default
+        >>> constants.DISABLE_OCR = True
+        >>> constants.MAX_CHARS_PER_PDF_PAGE = 50000
+        >>> config1 = PyPdfToTextConfig()
+        >>> config1.DISABLE_OCR
+        True
+        >>> config1.MAX_CHARS_PER_PDF_PAGE
+        50000
+
+        >>> # Example 2: Environment variables are re-read on each instantiation
+        >>> os.environ['AZURE_DOCINTEL_ENDPOINT'] = 'https://test.cognitiveservices.azure.com/'
+        >>> config2 = PyPdfToTextConfig()
+        >>> config2.AZURE_DOCINTEL_ENDPOINT
+        'https://test.cognitiveservices.azure.com/'
+        >>> os.environ['AZURE_DOCINTEL_ENDPOINT'] = 'https://prod.cognitiveservices.azure.com/'
+        >>> config3 = PyPdfToTextConfig()
+        >>> config3.AZURE_DOCINTEL_ENDPOINT
+        'https://prod.cognitiveservices.azure.com/'
+        >>> del os.environ['AZURE_DOCINTEL_ENDPOINT']
+
+        >>> # Example 3: Disable inheritance with INHERIT_CONSTANTS
+        >>> constants.DISABLE_PROGRESS_BAR = True
+        >>> config4 = PyPdfToTextConfig(overrides={"INHERIT_CONSTANTS": False})
+        >>> config4.DISABLE_PROGRESS_BAR  # Not inherited from constants
+        False
+        >>> config4.INHERIT_CONSTANTS
+        False
+
+        >>> # Example 4: Overrides supersede base which supersedes constants
+        >>> constants.FONT_HEIGHT_WEIGHT = 1.0
+        >>> constants.MIN_OCR_ROTATION_DEGREES = 1e-2
+        >>> base_config1 = PyPdfToTextConfig()
+        >>> base_config1.MIN_OCR_ROTATION_DEGREES = 0.001
+        >>> config5 = PyPdfToTextConfig(
+        ...     base=base_config1,
+        ...     overrides={"FONT_HEIGHT_WEIGHT": 3.0}
+        ... )
+        >>> config5.MIN_OCR_ROTATION_DEGREES
+        0.001
+        >>> config5.FONT_HEIGHT_WEIGHT
+        3.0
+        >>> # cleanup for doctest:
+        >>> constants.DISABLE_OCR = False
+        >>> constants.MAX_CHARS_PER_PDF_PAGE = 25000
+        >>> constants.MIN_OCR_ROTATION_DEGREES = 1e-5
+        >>> constants.DISABLE_PROGRESS_BAR = False
+        >>> constants._setattrs_ = set()
+    """
+
+    overrides: InitVar[PyPdfToTextConfigOverrides | dict[str, Any] | None] = None
+    base: InitVar[PyPdfToTextConfig | None] = None
+
+    def __init__(
         self,
-        base: PyPdfToTextConfig | None = None,
         overrides: PyPdfToTextConfigOverrides | dict[str, Any] | None = None,
+        base: PyPdfToTextConfig | None = None,
     ):
         """
         If base is supplied, merge fields by overwriting default values in the
-        new instance with custom values from the base.
+        new instance with non-default values from the base.
         """
-        if base:
-            for fld in fields(PyPdfToTextConfig):
-                if callable(fld.default_factory):
-                    _default = fld.default_factory()
-                else:
-                    _default = fld.default
-                if _default == getattr(self, fld.name) != (_base := getattr(base, fld.name)):
-                    setattr(self, fld.name, _base)
+        super().__init__()
+        super().__post_init__()
+        if base or constants.INHERIT_CONSTANTS:
+            base = cast(PyPdfToTextConfig, base or constants)
+            if base is constants and (overrides or {}).get("INHERIT_CONSTANTS") is False:
+                pass  # if overrides disables constant inheritance, don't inherit
+            else:
+                for field_name in base._setattrs_:  # pylint: disable=protected-access
+                    setattr(self, field_name, getattr(base, field_name))
         for field_name, val in (overrides or {}).items():
             if hasattr(self, field_name):
                 setattr(self, field_name, val)
-
-
-constants = PyPdfToTextConfig()
+            else:
+                logger.warning("Ignoring invalid override: %s=%s", field_name, val)
