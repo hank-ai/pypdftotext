@@ -1,0 +1,321 @@
+Intraprocedure Flowsheet Data (continued)
+                                                               98 %                      02/29/24        0818        Interface, Datacaptor Device In
+                                                               99 %                      02/29/24        0819        Interface, Datacaptor Device In
+                                                               100 %                     02/29/24        0820        Interface, Datacaptor Device In
+                                                               99 %                      02/29/24        0821        Interface, Datacaptor Device In
+                                                               99 %                      02/29/24        0822        Interface, Datacaptor Device In
+                                                               99 %                      02/29/24        0823        Interface, Datacaptor Device In
+                                                               99 %                      02/29/24        0824        Interface, Datacaptor Device In
+                                                               99 %                      02/29/24        0825        Interface, Datacaptor Device In
+                                                               99 %                      02/29/24        0826        Interface, Datacaptor Device In
+                                                               99 %                      02/29/24        0827        Interface, Datacaptor Device In
+                                                               98 %                      02/29/24        0828        Interface, Datacaptor Device In
+                                                               99 %                      02/29/24        0829        Interface, Datacaptor Device In
+                                                               100 %                     02/29/24        0830        Interface, Datacaptor Device In
+                                                               100 %                     02/29/24        0831        Interface, Datacaptor Device In
+                                                               100 %                     02/29/24        0832        Interface, Datacaptor Device In
+                                                               100 %                     02/29/24        0833        Interface, Datacaptor Device In
+                                                               100 %                     02/29/24        0834        Interface, Datacaptor Device In
+                                                               100 %                     02/29/24        0835        Interface, Datacaptor Device In
+                                                               100 %                     02/29/24        0836        Interface, Datacaptor Device In
+                                                               100 %                     02/29/24        0837        Interface, Datacaptor Device In
+                                                               100 %                     02/29/24        0838        Interface, Datacaptor Device In
+                                                               100 %                     02/29/24        0839        Interface, Datacaptor Device In
+                                                               100 %                     02/29/24        0840        Interface, Datacaptor Device In
+                                                               100 %                     02/29/24        0841        Interface, Datacaptor Device In
+                                                               99 %                      02/29/24        0842        Interface, Datacaptor Device In
+                                                               99 %                      02/29/24        0843        Interface, Datacaptor Device In
+                                                               99 %                      02/29/24        0844        Interface, Datacaptor Device In
+                                                               99 %                      02/29/24        0845        Interface, Datacaptor Device In
+                                                               99 %                      02/29/24        0846        Interface, Datacaptor Device In
+                                                               99 %                      02/29/24        0847        Interface, Datacaptor Device In
+                                                               99 %                      02/29/24        0848        Interface, Datacaptor Device In
+                                                               99 %                      02/29/24        0849        Interface, Datacaptor Device In
+                                                               99 %                      02/29/24        0850        Interface, Datacaptor Device In
+      NIBP (Mean)                                              100                       02/29/24        0828        Interface, Datacaptor Device In
+                                                               113                       02/29/24        0831        Interface, Datacaptor Device In
+                                                               109                       02/29/24        0834        Interface, Datacaptor Device In
+                                                               107                       02/29/24        0837        Interface, Datacaptor Device In
+                                                               97                        02/29/24        0840        Interface, Datacaptor Device In
+                                                               91                        02/29/24        0843        Interface, Datacaptor Device In
+                                                               89                        02/29/24        0846        Interface, Datacaptor Device In
+                                                               85                        02/29/24        0849        Interface, Datacaptor Device In
+                                                               80                        02/29/24        0852        Interface, Datacaptor Device In
+   Graph CV
+                                                               Value                     File Date/Time              Captured By                                 Edit History
+      None
+   Graph Vitals
+                                                               Value                     File Date/Time              Captured By                                 Edit History
+      NIBP                                                     127/80                    02/29/24        0828        Interface, Datacaptor Device In
+                                                               142/93                    02/29/24        0831        Interface, Datacaptor Device In
+                                                               139/89                    02/29/24        0834        Interface, Datacaptor Device In
+                                                               135/89                    02/29/24        0837        Interface, Datacaptor Device In
+                                                               127/75                    02/29/24        0840        Interface, Datacaptor Device In
+                                                               122/73                    02/29/24        0843        Interface, Datacaptor Device In
+                                                               118/70                    02/29/24        0846        Interface, Datacaptor Device In
+                                                               114/67                    02/29/24        0849        Interface, Datacaptor Device In
+                                                               109/64                    02/29/24        0852        Interface, Datacaptor Device In
+      Pulse                                                    68                        02/29/24        0813        Interface, Datacaptor Device In
+                                                               72                        02/29/24        0814        Interface, Datacaptor Device In
+                                                               74                        02/29/24        0815        Interface, Datacaptor Device In
+                                                               72                        02/29/24        0816        Interface, Datacaptor Device In
+                                                               74                        02/29/24        0817        Interface, Datacaptor Device In
+                                                               72                        02/29/24        0818        Interface, Datacaptor Device In
+                                                               72                        02/29/24        0819        Interface, Datacaptor Device In
+                                                               70                        02/29/24        0820        Interface, Datacaptor Device In
+                                                               72                        02/29/24        0821        Interface, Datacaptor Device In
+                                                               68                        02/29/24        0822        Interface, Datacaptor Device In
+                                                               72                        02/29/24        0823        Interface, Datacaptor Device In
+                                                               70                        02/29/24        0824        Interface, Datacaptor Device In
+                                                               72                        02/29/24        0825        Interface, Datacaptor Device In
+                                                               70                        02/29/24        0826        Interface, Datacaptor Device In
+                                                               74                        02/29/24        0827        Interface, Datacaptor Device In
+                                                               68                        02/29/24        0828        Interface, Datacaptor Device In
+                                                               76                        02/29/24        0829        Interface, Datacaptor Device In
+Intraprocedure Flowsheet Data
+   Agents
+                                                               Value                     File Date/Time              Captured By                                Edit History
+      O2 L/Min                                                 8 L/min                   02/29/24        0836        Barley, Ryan Andrew
+                                                               0 L/min                   02/29/24        0929        Barley, Ryan Andrew
+   Output
+                                                               Value                     File Date/Time              Captured By                                Edit History
+      None
+   Respiratory
+                                                               Value                     File Date/Time              Captured By                                Edit History
+      Vent Mode                                                Spontaneous               02/29/24        0836        Barley, Ryan Andrew
+                                                               Ventilation
+   Cardiovascular
+                                                               Value                     File Date/Time              Captured By                                Edit History
+      None
+   BP/Pulse
+                                                               Value                     File Date/Time              Captured By                                Edit History
+      NIBP                                                     106/66                    02/29/24        0847        Interface, Datacaptor Device In
+                                                               99/64                     02/29/24        0850        Interface, Datacaptor Device In
+                                                               112/68                    02/29/24        0853        Interface, Datacaptor Device In
+                                                               119/85                    02/29/24        0856        Interface, Datacaptor Device In
+                                                               108/72                    02/29/24        0859        Interface, Datacaptor Device In
+                                                               123/71                    02/29/24        0907        Interface, Datacaptor Device In
+                                                               124/60                    02/29/24        0910        Interface, Datacaptor Device In
+                                                               103/51                    02/29/24        0913        Interface, Datacaptor Device In
+                                                               92/46                     02/29/24        0916        Interface, Datacaptor Device In
+                                                               94/46                     02/29/24        0919        Interface, Datacaptor Device In
+      Pulse                                                    78                        02/29/24        0842        Interface, Datacaptor Device In
+                                                               76                        02/29/24        0843        Interface, Datacaptor Device In
+                                                               78                        02/29/24        0844        Interface, Datacaptor Device In
+                                                               78                        02/29/24        0845        Interface, Datacaptor Device In
+                                                               82                        02/29/24        0846        Interface, Datacaptor Device In
+                                                               80                        02/29/24        0847        Interface, Datacaptor Device In
+                                                               74                        02/29/24        0848        Interface, Datacaptor Device In
+                                                               86                        02/29/24        0849        Interface, Datacaptor Device In
+                                                               92                        02/29/24        0850        Interface, Datacaptor Device In
+                                                               84                        02/29/24        0851        Interface, Datacaptor Device In
+                                                               80                        02/29/24        0852        Interface, Datacaptor Device In
+                                                               72                        02/29/24        0853        Interface, Datacaptor Device In
+                                                               74                        02/29/24        0854        Interface, Datacaptor Device In
+                                                               74                        02/29/24        0855        Interface, Datacaptor Device In
+                                                               80                        02/29/24        0856        Interface, Datacaptor Device In
+                                                               84                        02/29/24        0857        Interface, Datacaptor Device In
+                                                               98                        02/29/24        0858        Interface, Datacaptor Device In
+                                                               100                       02/29/24        0859        Interface, Datacaptor Device In
+                                                               100                       02/29/24        0900        Interface, Datacaptor Device In
+                                                               102                       02/29/24        0901        Interface, Datacaptor Device In
+                                                               100                       02/29/24        0902        Interface, Datacaptor Device In
+                                                               122                       02/29/24        0903        Interface, Datacaptor Device In
+                                                               122                       02/29/24        0904        Interface, Datacaptor Device In
+Intraprocedure Flowsheet Data (continued)
+                                                               118                       02/29/24        0905        Interface, Datacaptor Device In
+                                                               122                       02/29/24        0906        Interface, Datacaptor Device In
+                                                               126                       02/29/24        0907        Interface, Datacaptor Device In
+                                                               128                       02/29/24        0908        Interface, Datacaptor Device In
+                                                               124                       02/29/24        0909        Interface, Datacaptor Device In
+                                                               118                       02/29/24        0910        Interface, Datacaptor Device In
+                                                               114                       02/29/24        0911        Interface, Datacaptor Device In
+                                                               102                       02/29/24        0912        Interface, Datacaptor Device In
+                                                               114                       02/29/24        0913        Interface, Datacaptor Device In
+                                                               106                       02/29/24        0914        Interface, Datacaptor Device In
+                                                               104                       02/29/24        0915        Interface, Datacaptor Device In
+                                                               108                       02/29/24        0916        Interface, Datacaptor Device In
+                                                               106                       02/29/24        0917        Interface, Datacaptor Device In
+                                                               100                       02/29/24        0918        Interface, Datacaptor Device In
+                                                               94                        02/29/24        0919        Interface, Datacaptor Device In
+                                                               92                        02/29/24        0920        Interface, Datacaptor Device In
+                                                               88                        02/29/24        0921        Interface, Datacaptor Device In
+      SpO2                                                     97 %                      02/29/24        0842        Interface, Datacaptor Device In
+                                                               97 %                      02/29/24        0843        Interface, Datacaptor Device In
+                                                               97 %                      02/29/24        0844        Interface, Datacaptor Device In
+                                                               97 %                      02/29/24        0845        Interface, Datacaptor Device In
+                                                               98 %                      02/29/24        0846        Interface, Datacaptor Device In
+                                                               98 %                      02/29/24        0847        Interface, Datacaptor Device In
+                                                               97 %                      02/29/24        0848        Interface, Datacaptor Device In
+                                                               98 %                      02/29/24        0849        Interface, Datacaptor Device In
+                                                               98 %                      02/29/24        0850        Interface, Datacaptor Device In
+                                                               98 %                      02/29/24        0851        Interface, Datacaptor Device In
+                                                               99 %                      02/29/24        0852        Interface, Datacaptor Device In
+                                                               98 %                      02/29/24        0853        Interface, Datacaptor Device In
+                                                               98 %                      02/29/24        0854        Interface, Datacaptor Device In
+                                                               99 %                      02/29/24        0855        Interface, Datacaptor Device In
+                                                               99 %                      02/29/24        0856        Interface, Datacaptor Device In
+                                                               99 %                      02/29/24        0857        Interface, Datacaptor Device In
+                                                               99 %                      02/29/24        0858        Interface, Datacaptor Device In
+                                                               91 %                      02/29/24        0859        Interface, Datacaptor Device In
+                                                               99 %                      02/29/24        0901        Interface, Datacaptor Device In
+                                                               99 %                      02/29/24        0902        Interface, Datacaptor Device In
+                                                               100 %                     02/29/24        0903        Interface, Datacaptor Device In
+                                                               99 %                      02/29/24        0904        Interface, Datacaptor Device In
+                                                               99 %                      02/29/24        0905        Interface, Datacaptor Device In
+                                                               98 %                      02/29/24        0906        Interface, Datacaptor Device In
+                                                               95 %                      02/29/24        0907        Interface, Datacaptor Device In
+                                                               94 %                      02/29/24        0908        Interface, Datacaptor Device In
+                                                               95 %                      02/29/24        0909        Interface, Datacaptor Device In
+                                                               96 %                      02/29/24        0910        Interface, Datacaptor Device In
+                                                               96 %                      02/29/24        0911        Interface, Datacaptor Device In
+                                                               97 %                      02/29/24        0912        Interface, Datacaptor Device In
+                                                               97 %                      02/29/24        0913        Interface, Datacaptor Device In
+                                                               97 %                      02/29/24        0914        Interface, Datacaptor Device In
+                                                               98 %                      02/29/24        0915        Interface, Datacaptor Device In
+                                                               98 %                      02/29/24        0916        Interface, Datacaptor Device In
+                                                               98 %                      02/29/24        0917        Interface, Datacaptor Device In
+                                                               98 %                      02/29/24        0918        Interface, Datacaptor Device In
+                                                               98 %                      02/29/24        0919        Interface, Datacaptor Device In
+                                                               98 %                      02/29/24        0920        Interface, Datacaptor Device In
+                                                               98 %                      02/29/24        0921        Interface, Datacaptor Device In
+      NIBP (Mean)                                              77                        02/29/24        0847        Interface, Datacaptor Device In
+                                                               76                        02/29/24        0850        Interface, Datacaptor Device In
+                                                               86                        02/29/24        0853        Interface, Datacaptor Device In
+                                                               99                        02/29/24        0856        Interface, Datacaptor Device In
+                                                               80                        02/29/24        0859        Interface, Datacaptor Device In
+                                                               93                        02/29/24        0907        Interface, Datacaptor Device In
+                                                               86                        02/29/24        0910        Interface, Datacaptor Device In
+                                                               73                        02/29/24        0913        Interface, Datacaptor Device In
+                                                               66                        02/29/24        0916        Interface, Datacaptor Device In
+                                                               66                        02/29/24        0919        Interface, Datacaptor Device In
+   Graph CV
+                                                               Value                     File Date/Time              Captured By                                 Edit History
+      None
+   Graph Vitals
+                                                               Value                     File Date/Time              Captured By                                 Edit History
+      NIBP                                                     106/66                    02/29/24        0847        Interface, Datacaptor Device In
+                                                               99/64                     02/29/24        0850        Interface, Datacaptor Device In
+Intraprocedure Flowsheet Data
+   Agents
+                                                               Value                     File Date/Time             Captured By                                 Edit History
+      O2 L/Min                                                 4 L/min                   02/29/24       1015        Thomas, Joshua Blake
+                                                               0 L/min                   02/29/24       1131        Thomas, Joshua Blake
+   Output
+                                                               Value                     File Date/Time             Captured By                                 Edit History
+      None
+   Respiratory
+                                                               Value                     File Date/Time             Captured By                                 Edit History
+      None
+   Cardiovascular
+                                                               Value                     File Date/Time             Captured By                                 Edit History
+      None
+   BP/Pulse
+                                                               Value                     File Date/Time             Captured By                                 Edit History
+      NIBP                                                     145/85                    02/29/24       1025        Thomas, Joshua Blake
+                                                               145/76                    02/29/24       1054        Interface, Datacaptor Device In
+                                                               143/72                    02/29/24       1057        Interface, Datacaptor Device In
+                                                               141/74                    02/29/24       1100        Interface, Datacaptor Device In
+                                                               150/80                    02/29/24       1103        Interface, Datacaptor Device In
+                                                               132/67                    02/29/24       1106        Interface, Datacaptor Device In
+                                                               126/63                    02/29/24       1109        Interface, Datacaptor Device In
+                                                               114/58                    02/29/24       1112        Interface, Datacaptor Device In
+                                                               102/55                    02/29/24       1115        Interface, Datacaptor Device In
+                                                               95/47                     02/29/24       1118        Interface, Datacaptor Device In
+                                                               88/49                     02/29/24       1121        Interface, Datacaptor Device In
+                                                               88/47                     02/29/24       1124        Interface, Datacaptor Device In
+                                                               79/40                     02/29/24       1127        Interface, Datacaptor Device In
+                                                               81/42                     02/29/24       1130        Interface, Datacaptor Device In
+      Pulse                                                    86                        02/29/24       1023        Interface, Datacaptor Device In
+                                                               80                        02/29/24       1024        Interface, Datacaptor Device In
+                                                               78                        02/29/24       1025        Interface, Datacaptor Device In
+                                                               78                        02/29/24       1026        Interface, Datacaptor Device In
+                                                               80                        02/29/24       1027        Interface, Datacaptor Device In
+                                                               84                        02/29/24       1028        Interface, Datacaptor Device In
+                                                               78                        02/29/24       1029        Interface, Datacaptor Device In
+                                                               78                        02/29/24       1030        Interface, Datacaptor Device In
+                                                               122                       02/29/24       1031        Interface, Datacaptor Device In
+                                                               120                       02/29/24       1032        Interface, Datacaptor Device In
+                                                               134                       02/29/24       1033        Interface, Datacaptor Device In
+                                                               124                       02/29/24       1034        Interface, Datacaptor Device In
+                                                               132                       02/29/24       1035        Interface, Datacaptor Device In
+                                                               136                       02/29/24       1036        Interface, Datacaptor Device In
+                                                               140                       02/29/24       1037        Interface, Datacaptor Device In
+                                                               76                        02/29/24       1038        Interface, Datacaptor Device In
+Intraprocedure Flowsheet Data (continued)
+                                                               126                        02/29/24       1039         Interface, Datacaptor Device In
+                                                               76                         02/29/24       1040         Interface, Datacaptor Device In
+                                                               114                        02/29/24       1041         Interface, Datacaptor Device In
+                                                               98                         02/29/24       1042         Interface, Datacaptor Device In
+                                                               116                        02/29/24       1043         Interface, Datacaptor Device In
+                                                               90                         02/29/24       1044         Interface, Datacaptor Device In
+                                                               90                         02/29/24       1045         Interface, Datacaptor Device In
+                                                               78                         02/29/24       1046         Interface, Datacaptor Device In
+                                                               88                         02/29/24       1047         Interface, Datacaptor Device In
+                                                               76                         02/29/24       1048         Interface, Datacaptor Device In
+                                                               74                         02/29/24       1049         Interface, Datacaptor Device In
+                                                               74                         02/29/24       1050         Interface, Datacaptor Device In
+                                                               78                         02/29/24       1051         Interface, Datacaptor Device In
+                                                               84                         02/29/24       1052         Interface, Datacaptor Device In
+                                                               82                         02/29/24       1053         Interface, Datacaptor Device In
+                                                               76                         02/29/24       1054         Interface, Datacaptor Device In
+                                                               76                         02/29/24       1055         Interface, Datacaptor Device In
+                                                               76                         02/29/24       1056         Interface, Datacaptor Device In
+                                                               72                         02/29/24       1057         Interface, Datacaptor Device In
+                                                               68                         02/29/24       1058         Interface, Datacaptor Device In
+                                                               68                         02/29/24       1059         Interface, Datacaptor Device In
+                                                               68                         02/29/24       1100         Interface, Datacaptor Device In
+                                                               76                         02/29/24       1101         Interface, Datacaptor Device In
+                                                               80                         02/29/24       1102         Interface, Datacaptor Device In
+                                                               82                         02/29/24       1103         Interface, Datacaptor Device In
+                                                               78                         02/29/24       1104         Interface, Datacaptor Device In
+                                                               80                         02/29/24       1105         Interface, Datacaptor Device In
+                                                               82                         02/29/24       1106         Interface, Datacaptor Device In
+                                                               76                         02/29/24       1107         Interface, Datacaptor Device In
+                                                               76                         02/29/24       1108         Interface, Datacaptor Device In
+                                                               78                         02/29/24       1109         Interface, Datacaptor Device In
+                                                               78                         02/29/24       1110         Interface, Datacaptor Device In
+                                                               80                         02/29/24       1111         Interface, Datacaptor Device In
+                                                               80                         02/29/24       1112         Interface, Datacaptor Device In
+                                                               80                         02/29/24       1113         Interface, Datacaptor Device In
+                                                               80                         02/29/24       1114         Interface, Datacaptor Device In
+                                                               80                         02/29/24       1115         Interface, Datacaptor Device In
+                                                               82                         02/29/24       1116         Interface, Datacaptor Device In
+                                                               80                         02/29/24       1117         Interface, Datacaptor Device In
+                                                               80                         02/29/24       1118         Interface, Datacaptor Device In
+                                                               80                         02/29/24       1119         Interface, Datacaptor Device In
+                                                               82                         02/29/24       1120         Interface, Datacaptor Device In
+                                                               82                         02/29/24       1121         Interface, Datacaptor Device In
+                                                               82                         02/29/24       1122         Interface, Datacaptor Device In
+                                                               82                         02/29/24       1123         Interface, Datacaptor Device In
+                                                               82                         02/29/24       1124         Interface, Datacaptor Device In
+                                                               82                         02/29/24       1125         Interface, Datacaptor Device In
+                                                               82                         02/29/24       1126         Interface, Datacaptor Device In
+                                                               82                         02/29/24       1127         Interface, Datacaptor Device In
+                                                               80                         02/29/24       1128         Interface, Datacaptor Device In
+                                                               82                         02/29/24       1129         Interface, Datacaptor Device In
+                                                               80                         02/29/24       1130         Interface, Datacaptor Device In
+                                                               80                         02/29/24       1131         Interface, Datacaptor Device In
+      SpO2                                                     99 %                       02/29/24       1024         Interface, Datacaptor Device In
+                                                               100 %                      02/29/24       1025         Interface, Datacaptor Device In
+                                                               100 %                      02/29/24       1026         Interface, Datacaptor Device In
+                                                               100 %                      02/29/24       1027         Interface, Datacaptor Device In
+                                                               100 %                      02/29/24       1028         Interface, Datacaptor Device In
+                                                               100 %                      02/29/24       1029         Interface, Datacaptor Device In
+                                                               100 %                      02/29/24       1030         Interface, Datacaptor Device In
+                                                               99 %                       02/29/24       1031         Interface, Datacaptor Device In
+                                                               100 %                      02/29/24       1032         Interface, Datacaptor Device In
+                                                               100 %                      02/29/24       1033         Interface, Datacaptor Device In
+                                                               99 %                       02/29/24       1034         Interface, Datacaptor Device In
+                                                               99 %                       02/29/24       1035         Interface, Datacaptor Device In
+                                                               99 %                       02/29/24       1036         Interface, Datacaptor Device In
+                                                               99 %                       02/29/24       1037         Interface, Datacaptor Device In
+                                                               99 %                       02/29/24       1038         Interface, Datacaptor Device In
+                                                               99 %                       02/29/24       1039         Interface, Datacaptor Device In
+                                                               99 %                       02/29/24       1040         Interface, Datacaptor Device In
+                                                               99 %                       02/29/24       1041         Interface, Datacaptor Device In
+                                                               99 %                       02/29/24       1042         Interface, Datacaptor Device In
+                                                               100 %                      02/29/24       1043         Interface, Datacaptor Device In
+                                                               100 %                      02/29/24       1044         Interface, Datacaptor Device In
+                                                               99 %                       02/29/24       1045         Interface, Datacaptor Device In
+                                                               99 %                       02/29/24       1046         Interface, Datacaptor Device In

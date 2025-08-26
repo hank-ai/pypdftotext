@@ -1,354 +1,190 @@
 # pypdftotext
 
-*An OCR-enabled structured text extraction extension for pypdf.*
+[![PyPI version](https://badge.fury.io/py/pypdftotext.svg)](https://badge.fury.io/py/pypdftotext)
+[![Python Support](https://img.shields.io/pypi/pyversions/pypdftotext)](https://pypi.org/project/pypdftotext/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Returns the text of a PDF from pypdf's "layout mode". If no text is found, optionally submit the PDF for OCR via Azure Document Intelligence.
+**OCR-enabled PDF text extraction built on pypdf and Azure Document Intelligence**
 
-## Table of Contents
+pypdftotext is a Python package that intelligently extracts text from PDF files. It uses pypdf's advanced layout mode for embedded text extraction and seamlessly falls back to Azure Document Intelligence OCR when no embedded text is found.
 
-- [Requirements](#requirements)
-- [Installation](#installation)
-- [Quick Start](#quick-start)
-- [API Reference](#api-reference)
-  - [pdf_text_pages](#pdf_text_pages)
-  - [pdf_text_page_lines](#pdf_text_page_lines)
-  - [handwritten_ratio](#handwritten_ratio)
-- [Azure OCR Configuration](#azure-ocr-configuration)
-  - [Environment Variables](#environment-variables)
-  - [Creating the OCR Client](#creating-the-ocr-client)
-- [Configuration Constants](#configuration-constants)
-- [OCR Triggering Behavior](#ocr-triggering-behavior)
-- [Processing Outputs](#processing-outputs)
+## Key Features
 
-## Requirements
-
-- **Python**: 3.10, 3.11, or 3.12
-- **Dependencies**:
-  - `pypdf==5.2` - PDF parsing and text extraction
-  - `azure-ai-documentintelligence==1.0.1` - Azure Document Intelligence OCR integration
-  - `tqdm` - Progress bar for processing feedback
+- 🚀 **Fast embedded text extraction** using pypdf's layout mode
+- 🔄 **Automatic OCR fallback** via Azure Document Intelligence when needed
+- 🧵 **Thread-safe operations** with the `PdfExtract` class
+- 📦 **S3 support** for reading PDFs directly from AWS S3
+- 🖼️ **Image compression** to reduce PDF file sizes
+- ✍️ **Handwritten text detection** with confidence scoring
+- 📄 **Page manipulation** - create child PDFs and extract page subsets
+- ⚙️ **Flexible Configuration** with built in env support multiple inheritance options
 
 ## Installation
+
+### Basic Installation
 
 ```bash
 pip install pypdftotext
 ```
 
-## Quick Start
-
-```python
-from pathlib import Path
-import pypdftotext
-
-# Basic usage - extract text from all pages
-pdf = Path("document.pdf").read_bytes()  # can be PdfReader, bytes, or io.BytesIO
-pdf_text = "\n".join(pypdftotext.pdf_text_pages(pdf))
-print(pdf_text)
-
-# Extract text as lines per page
-pdf_lines = pypdftotext.pdf_text_page_lines(pdf)
-for page_num, lines in enumerate(pdf_lines, 1):
-    print(f"Page {page_num} has {len(lines)} lines")
-
-# Check handwritten content ratio (for OCR'd pages)
-ratio = pypdftotext.handwritten_ratio(page_index=0)
-print(f"Page 1 is {ratio:.1%} handwritten")
-```
-
-## API Reference
-
-### pdf_text_pages
-
-Extract text from PDF pages and return as a list of multiline strings.
-
-```python
-pypdftotext.pdf_text_pages(
-    pdf_reader: PdfReader | io.BytesIO | bytes,
-    debug_path: Path | None = None,
-    page_indices: list[int] | None = None,
-    replace_byte_codes: dict[bytes, bytes] | None = None,
-    **kwargs
-) -> list[str]
-```
-
-**Parameters:**
-- `pdf_reader`: PDF input as PdfReader, bytes, or BytesIO
-- `debug_path`: Optional path to write pypdf debug files
-- `page_indices`: List of specific page indices to extract (0-based), None for all pages
-- `replace_byte_codes`: Dictionary for replacing custom glyphs with Unicode equivalents
-
-**Keyword Arguments:**
-- `min_lines_ocr_trigger` (int): Minimum lines threshold for OCR consideration (default: from constants)
-- `trigger_ocr_page_ratio` (float): Fraction of pages needing OCR to trigger batch OCR (default: from constants)
-- `preserve_vertical_whitespace` (bool): Preserve blank lines in output (default: from constants)
-- `scale_weight` (float): Weight for calculating fixed char width (default: from constants)
-- `font_height_weight` (float): Factor for line splitting behavior (default: from constants)
-- `suppress_embedded_text` (bool): Skip embedded text extraction, OCR all pages (default: from constants)
-- `pbar_position` (int): Position for tqdm progress bar in parallel processing
-
-**Returns:** List of strings, one per page
-
-**Example:**
-```python
-import pypdftotext
-from pathlib import Path
-
-# Extract specific pages with custom OCR triggering
-pdf_bytes = Path("document.pdf").read_bytes()
-pages_text = pypdftotext.pdf_text_pages(
-    pdf_bytes,
-    page_indices=[0, 2, 4],  # Extract pages 1, 3, and 5
-    min_lines_ocr_trigger=3,  # OCR if less than 3 lines found
-    trigger_ocr_page_ratio=0.5,  # OCR if 50% of pages need it
-    preserve_vertical_whitespace=True  # Keep blank lines
-)
-
-for i, page_text in enumerate(pages_text):
-    print(f"Page {i+1}:\n{page_text}\n")
-```
-
-### pdf_text_page_lines
-
-Extract text from PDF pages and return as a list of lines for each page.
-
-```python
-pypdftotext.pdf_text_page_lines(
-    pdf_reader: PdfReader | io.BytesIO | bytes,
-    debug_path: Path | None = None,
-    page_indices: list[int] | None = None,
-    replace_byte_codes: dict[bytes, bytes] | None = None,
-    **kwargs
-) -> list[list[str]]
-```
-
-**Parameters:** Same as `pdf_text_pages`
-
-**Returns:** List of lists, where each inner list contains lines for a page
-
-**Example:**
-```python
-import pypdftotext
-
-# Get lines for analysis
-pdf_lines = pypdftotext.pdf_text_page_lines(pdf_bytes)
-
-# Process lines individually
-for page_idx, page_lines in enumerate(pdf_lines):
-    print(f"Page {page_idx + 1}:")
-    for line_num, line in enumerate(page_lines, 1):
-        if line.strip():  # Skip empty lines
-            print(f"  Line {line_num}: {line}")
-```
-
-### handwritten_ratio
-
-Calculate the ratio of handwritten to total characters on an OCR'd page.
-
-```python
-pypdftotext.handwritten_ratio(
-    page_index: int,
-    handwritten_confidence_limit: float | None = None
-) -> float
-```
-
-**Parameters:**
-- `page_index`: 0-based index of the page to analyze
-- `handwritten_confidence_limit`: Minimum confidence for handwritten detection (default: from constants)
-
-**Returns:** Float between 0.0 and 1.0 representing the handwritten content ratio
-
-**Note:** Returns 0.0 if the page was not OCR'd or has no content
-
-**Example:**
-```python
-import pypdftotext
-
-# Process PDF with potential handwritten content
-pdf_text = pypdftotext.pdf_text_pages(pdf_bytes)
-
-# Check each page for handwritten content
-for page_idx in range(len(pdf_text)):
-    ratio = pypdftotext.handwritten_ratio(page_idx)
-    if ratio > 0.5:
-        print(f"Page {page_idx + 1} is mostly handwritten ({ratio:.1%})")
-```
-
-## Azure OCR Configuration
-
-### Environment Variables
-
-| Variable | Required | Description | Default |
-|----------|----------|-------------|---------|
-| `AZURE_DOCINTEL_ENDPOINT` | No* | Azure Document Intelligence API endpoint URL | `""` |
-| `AZURE_DOCINTEL_SUBSCRIPTION_KEY` | No* | Azure Document Intelligence API subscription key | `""` |
-
-*Required for OCR functionality. Without these, only embedded PDF text extraction is available.
-
-### Creating the OCR Client
-
-The OCR client can be configured in three ways:
-
-#### 1. Automatic via Environment Variables (Recommended)
-
-Set environment variables before importing pypdftotext:
+### Optional Dependencies
 
 ```bash
-export AZURE_DOCINTEL_ENDPOINT="https://your-instance.cognitiveservices.azure.com/"
-export AZURE_DOCINTEL_SUBSCRIPTION_KEY="your-api-key"
+# Install with boto3 for S3 support
+pip install "pypdftotext[s3]"
+
+# Install with pillow for scanned pdf compression support
+pip install "pypdftotext[image]"
+
+# For all optional features (s3 and pillow)
+pip install "pypdftotext[full]"
+
+# For development (full + boto3-types[s3], pytest, pytest-cov)
+pip install "pypdftotext[dev]"
 ```
+
+### Requirements
+
+- Python 3.10, 3.11, or 3.12
+- pypdf 6.0
+- azure-ai-documentintelligence >= 1.0.0
+- tqdm (for progress bars)
+- boto3 (optional)
+- pillow (optional)
+
+## Quick Start
+
+### Enable Azure OCR (optional)
+
+> NOTE: If OCR has not been configured, only the text embedded directly in the pdf will be returned (using [pypdf's](https://pypdf.readthedocs.io/en/stable/user/extract-text.html) layout mode).
+
+#### OCR Prerequisites
+- An Azure Subscription ([create one for free](https://azure.microsoft.com/free/cognitive-services/))
+- An Azure Document Intelligence resource ([create one](https://portal.azure.com/#create/Microsoft.CognitiveServicesFormRecognizer))
+
+#### OCR Configuration
+
+> NOTE: The same behaviors apply to the AWS_* settings for pulling PDFs from S3.
+
+##### You can set your Endpoint and Subscription Key globally via env vars:
+
+```bash
+export AZURE_DOCINTEL_ENDPOINT="https://your-resource.cognitiveservices.azure.com/"
+export AZURE_DOCINTEL_SUBSCRIPTION_KEY="your-subscription-key"
+```
+
+##### Or via the `constants` module:
 
 ```python
-import pypdftotext
-# Client will be created automatically when OCR is needed
+from pypdftotext import constants
+constants.AZURE_DOCINTEL_ENDPOINT = "https://your-resource.cognitiveservices.azure.com/"
+constants.AZURE_DOCINTEL_SUBSCRIPTION_KEY = "your-subscription-key"
 ```
 
-#### 2. Manual via Constants Module
+You can also set these values for individual instances of the PyPdfToTextConfig class, instances of which are exposed by the `config` attribute of `PdfExtract` and `AzureDocIntelIntegrator` classes. See [below](#optional-customize-the-config).
+
+### Basic Usage
+
+#### Create a PdfExtract Instance
+```python
+from pypdftotext import PdfExtract
+
+extract = PdfExtract("document.pdf")
+```
+
+#### Optional: Customize the Config
+
+> NOTE: if you've [set env vars or constants](#ocr-configuration), setting the endpoint and subscription key is optional. However, it is still acceptable to set them (and any other config options) on the instance itself after creating it.
 
 ```python
-import pypdftotext
-
-# Configure before processing
-pypdftotext.constants.AZURE_DOCINTEL_ENDPOINT = "https://your-instance.cognitiveservices.azure.com/"
-pypdftotext.constants.AZURE_DOCINTEL_SUBSCRIPTION_KEY = "your-api-key"
+extract.config.AZURE_DOCINTEL_ENDPOINT = "https://your-resource.cognitiveservices.azure.com/"
+extract.config.AZURE_DOCINTEL_SUBSCRIPTION_KEY = "your-subscription-key"
+extract.config.PRESERVE_VERTICAL_WHITESPACE = True
 ```
 
-#### 3. Direct Client Creation
+#### Extract Text with OCR Fallback
 
 ```python
-import pypdftotext
+text = extract.text
+print(text)
 
-# Manually trigger client creation
-pypdftotext.AZURE_READ.create_client()
+# Get text by page
+for i, page_text in enumerate(extract.text_pages):
+    print(f"Page {i + 1}: {page_text[:100]}...")
 ```
 
-## Configuration Constants
+#### Compress Images in Scanned PDFs to Reduce File Size or Improve OCR
 
-All constants can be modified via `pypdftotext.constants.<CONSTANT_NAME>`:
+> NOTE: Requires the optional `pypdftotext[images]` installation.
 
-### OCR Control
-
-| Constant | Type | Default | Description |
-|----------|------|---------|-------------|
-| `AZURE_DOCINTEL_AUTO_CLIENT` | bool | `True` | Auto-create OCR client on first use |
-| `DISABLE_OCR` | bool | `False` | Disable all OCR operations |
-| `SUPPRESS_EMBEDDED_TEXT` | bool | `False` | Skip embedded text extraction, OCR all pages |
-| `MIN_LINES_OCR_TRIGGER` | int | `1` | Pages with fewer lines trigger OCR consideration |
-| `TRIGGER_OCR_PAGE_RATIO` | float | `0.99` | Fraction of pages needing OCR to trigger batch processing |
-| `OCR_HANDWRITTEN_CONFIDENCE_LIMIT` | float | `0.8` | Minimum confidence for handwritten text detection |
-
-### Text Extraction
-
-| Constant | Type | Default | Description |
-|----------|------|---------|-------------|
-| `PRESERVE_VERTICAL_WHITESPACE` | bool | `False` | Insert blank lines for vertical spacing |
-| `FONT_HEIGHT_WEIGHT` | float | `1.0` | Factor for line splitting behavior |
-| `SCALE_WEIGHT` | float | `1.25` | Weight for fixed char width calculation |
-| `MAX_CHARS_PER_PDF_PAGE` | int | `25000` | Maximum characters per page (corruption detection) |
-
-### OCR Processing
-
-| Constant | Type | Default | Description |
-|----------|------|---------|-------------|
-| `OCR_LINE_HEIGHT_SCALE` | int | `50` | Line splitting factor for OCR (0-100) |
-| `OCR_POSITIONING_SCALE` | int | `100` | Coordinate upscaling factor for OCR layout |
-| `MIN_OCR_ROTATION_DEGREES` | float | `1e-5` | Minimum rotation to apply from OCR results |
-
-### UI Control
-
-| Constant | Type | Default | Description |
-|----------|------|---------|-------------|
-| `DISABLE_PROGRESS_BAR` | bool | `False` | Disable tqdm progress bars |
-
-**Example Configuration:**
+> NOTE: Perform this step _before_ accessing text/text_pages to use the compressed PDF for OCR. Otherwise, text will already be extracted from the original version and will not be re-extracted.
 
 ```python
-import pypdftotext
-
-# Configure for aggressive OCR with preserved formatting
-pypdftotext.constants.MIN_LINES_OCR_TRIGGER = 5  # OCR if less than 5 lines
-pypdftotext.constants.TRIGGER_OCR_PAGE_RATIO = 0.5  # OCR if 50% need it
-pypdftotext.constants.PRESERVE_VERTICAL_WHITESPACE = True  # Keep formatting
-pypdftotext.constants.DISABLE_PROGRESS_BAR = True  # No progress bars (for logging)
-
-# Process PDF with custom settings
-pdf_text = pypdftotext.pdf_text_pages(pdf_bytes)
+extract.compress_images(  # always converts images to greyscale
+    white_point = 200,  # pixels with values from 201 to 255 are set to 256 (aka white) to remove scanner artifacts
+    aspect_tolerance=0.01,  # resizes images whose aspect ratios (width/height) are within 0.01 of the page aspect ratio
+    max_overscale = 1.5,  # images having a width more than 1.5x the displayed width of the PDF page are downsampled to 1.5x
+)
 ```
 
-## OCR Triggering Behavior
+#### Saving a Corrected or Compressed Pdf Version
 
-The library uses a two-stage decision process for OCR:
-
-1. **Page-level detection**: Each page is checked for embedded text. If a page has fewer lines than `MIN_LINES_OCR_TRIGGER`, it's marked for potential OCR.
-
-2. **Document-level decision**: OCR is triggered only if the ratio of marked pages to total pages meets or exceeds `TRIGGER_OCR_PAGE_RATIO`.
-
-This prevents unnecessary OCR for documents with mostly extractable text and a few image-only pages (e.g., charts or diagrams).
-
-**Example Scenarios:**
-
-```python
-# Scenario 1: OCR everything (scanned documents)
-pypdftotext.constants.MIN_LINES_OCR_TRIGGER = 999999  # Always trigger
-pypdftotext.constants.TRIGGER_OCR_PAGE_RATIO = 0.0  # Any page triggers OCR
-
-# Scenario 2: OCR only fully scanned documents (default)
-pypdftotext.constants.MIN_LINES_OCR_TRIGGER = 1  # Empty pages
-pypdftotext.constants.TRIGGER_OCR_PAGE_RATIO = 0.99  # All pages must be empty
-
-# Scenario 3: Mixed documents with some scanned pages
-pypdftotext.constants.MIN_LINES_OCR_TRIGGER = 3  # Very little text
-pypdftotext.constants.TRIGGER_OCR_PAGE_RATIO = 0.3  # 30% threshold
-```
-
-## Processing Outputs
-
-### Text Output Format
-
-- **Embedded text**: Extracted using pypdf's layout mode, preserving spatial relationships
-- **OCR text**: Processed through Azure Document Intelligence, reconstructed in fixed-width format
-- **Corruption handling**: Pages exceeding `MAX_CHARS_PER_PDF_PAGE` return empty strings with warnings
-
-### Debug Output
-
-When `debug_path` is provided:
-- pypdf layout debug files are written to the specified directory
-- OCR results are saved as `ocr_pages.json` for analysis
+> NOTE: If a scanned PDF contains upside down or rotated pages, these pages will be reoriented automatically during text extraction.
 
 ```python
 from pathlib import Path
-
-debug_dir = Path("./debug_output")
-debug_dir.mkdir(exist_ok=True)
-
-pdf_text = pypdftotext.pdf_text_pages(
-    pdf_bytes,
-    debug_path=debug_dir
-)
-# Check debug_dir for diagnostic files
+Path("compressed_corrected_document.pdf").write_bytes(extract.body)
 ```
 
-### Return Values
-
-- **Empty pages**: Return empty strings (`""`)
-- **Failed OCR**: Returns empty strings with logged warnings
-- **Corrupted pages**: Returns empty strings after logging character count violations
-
-### Error Handling
-
-The library logs errors and warnings using Python's `logging` module:
+#### PDF Splitting
 
 ```python
-import logging
-
-# Enable detailed logging
-logging.basicConfig(level=logging.INFO)
-
-# Process with logging
-pdf_text = pypdftotext.pdf_text_pages(pdf_bytes)
+# create a new PdfExtract instance containing the first 10 pages of the original PDF.
+extract_child = extract.child((0, 9))  # useful for passing config and metadata forward.
+# get the bytes of a PDF containing pages 1, 3, and 5 without creating a new PdfExtract instance.
+clipped_pages_pdf_bytes = extract_child.clip_pages([0, 2, 4])  # useful for quick splitting.
 ```
 
-Common log messages:
-- `"Azure OCR Client Created"` - Successful client initialization
-- `"Corruption detected"` - Page exceeds character limits
-- `"Failed to create Azure OCR Client"` - Missing credentials
-- `"X pages OCR'd successfully"` - OCR completion status
+### S3 Support
+If an S3 URI (e.g. `s3://my-bucket/path/to/document.pdf`) is supplied as the `pdf` parameter, `PdfExtract` will attempt to pull the bytes from the supplied bucket/key. AWS credentials with proper permissions must be supplied as env vars or set programmatically [as described for Azure OCR above](#ocr-configuration) or an error will result.
+
+## Implementation Details
+
+### OCR Triggering Logic
+
+OCR is automatically triggered when:
+1. The ratio of low-text pages exceeds `TRIGGER_OCR_PAGE_RATIO` (default: 99% of pages)
+2. A page is considered "low-text" if it has ≤ `MIN_LINES_OCR_TRIGGER` lines (default: 1)
+
+Example: OCR only when 50% of pages have fewer than 5 lines:
+```python
+config = PyPdfToTextConfig(
+    MIN_LINES_OCR_TRIGGER=5,
+    TRIGGER_OCR_PAGE_RATIO=0.5
+)
+```
+
+### Configuration (Optional)
+
+The PyPdfToTextConfig and PyPdfToTextConfigOverrides (optional) classes can be used to customize the operation of individual PdfExtract instances if desired.
+
+1. New PdfToTextConfig instances will first reinitialize all relevant settings from the [env](#you-can-set-your-endpoint-and-subscription-key-globally-via-env-vars) and then inherit any settings that have been [set programmatically](#or-via-the-constants-module) via `constants`. This allows users to globally set API keys (via env OR `constants`) and other desired behaviors (via `constants` only) eliminating the need to supply the `config` parameter to every `PdfExtract` instance.
+2. Inheritance from the global constants can be disabled globally by setting `constants.INHERIT_CONSTANTS` to False or for a single PyPdfToTextConfig instance using the `overrides` parameter (e.g. `PyPdfToTextConfig(overrides={"INHERIT_CONSTANTS": False})`). The `PdfToTextConfigOverrides` TypedDict is available for IDE and typing support.
+3. An alternate `base` can be supplied to the PyPdfToTextConfig constructor. If supplied, its values supersede those in the global `constants`.
+4. If both a `base` and `overrides` are supplied, overlapping settings in `overrides` will supersede those in `base` (or `constants`).
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## Links
+
+- [GitHub Repository](https://github.com/hank-ai/pypdftotext)
+- [Issue Tracker](https://github.com/hank-ai/pypdftotext/issues)
+- [PyPI Package](https://pypi.org/project/pypdftotext/)
+
+## Acknowledgments
+
+Built on top of:
+- [pypdf](https://github.com/py-pdf/pypdf) for PDF parsing
+- [Azure Document Intelligence](https://azure.microsoft.com/en-us/services/cognitive-services/form-recognizer/) for OCR capabilities
