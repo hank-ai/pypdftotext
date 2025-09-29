@@ -344,7 +344,7 @@ class PdfExtract:
                 # perform byte code substitutions per 'replace_byte_codes' arg if in batch mode
                 if replacements and txt:
                     for old_, new_ in replacements:
-                        txt = ext_pg.text.replace(old_, new_)
+                        txt = txt.replace(old_, new_)
 
                 ext_pg.text = txt
                 ext_pg.source = "OCR"
