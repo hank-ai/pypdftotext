@@ -4,5 +4,11 @@
         "--disable=W0311,R0903,C0301,C0302,W1203"
     ],
     "python.analysis.typeCheckingMode": "standard",
-    "editor.formatOnSave": true
+    "editor.formatOnSave": true,
+  "python.testing.pytestArgs": [
+    "tests",
+    "--cov=pypdftotext",
+    "--cov-report=html",
+    "--cov-report=term"
+  ],
 }

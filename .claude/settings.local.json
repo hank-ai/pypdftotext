@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m pytest tests/test_batch.py -v)",
+      "Bash(python -m pytest tests/test_pdf_extract.py -v)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

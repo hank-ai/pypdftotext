@@ -12,6 +12,7 @@ pypdftotext is a Python package that intelligently extracts text from PDF files.
 
 - 🚀 **Fast embedded text extraction** using pypdf's layout mode
 - 🔄 **Automatic OCR fallback** via Azure Document Intelligence when needed
+- 🚛 **Batch processing** with parallel OCR for multiple PDFs
 - 🧵 **Thread-safe operations** with the `PdfExtract` class
 - 📦 **S3 support** for reading PDFs directly from AWS S3
 - 🖼️ **Image compression** to reduce PDF file sizes
@@ -144,6 +145,28 @@ extract_child = extract.child((0, 9))  # useful for passing config and metadata 
 # get the bytes of a PDF containing pages 1, 3, and 5 without creating a new PdfExtract instance.
 clipped_pages_pdf_bytes = extract_child.clip_pages([0, 2, 4])  # useful for quick splitting.
 ```
+
+### Batch Processing
+
+Process multiple PDFs efficiently with parallel OCR:
+
+```python
+from pypdftotext.batch import PdfExtractBatch
+
+# Process multiple PDFs (list or dict)
+pdfs = ["file1.pdf", "file2.pdf", "file3.pdf"]
+# or
+pdfs = {"report": "report.pdf", "invoice": "invoice.pdf"}
+
+batch = PdfExtractBatch(pdfs)
+results = batch.extract_all()  # Returns dict[str, PdfExtract]
+
+# Access results
+for name, pdf_extract in results.items():
+    print(f"{name}: {len(pdf_extract.text)} characters extracted")
+```
+
+Batch processing extracts embedded text sequentially, then performs OCR in parallel for all PDFs that need it.
 
 ### S3 Support
 If an S3 URI (e.g. `s3://my-bucket/path/to/document.pdf`) is supplied as the `pdf` parameter, `PdfExtract` will attempt to pull the bytes from the supplied bucket/key. AWS credentials with proper permissions must be supplied as env vars or set programmatically [as described for Azure OCR above](#ocr-configuration) or an error will result.
