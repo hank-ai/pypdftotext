@@ -117,12 +117,12 @@ class TestPdfExtract(unittest.TestCase):
 
         # Should have extracted embedded text but not performed OCR
         self.assertGreater(len(pages), 0)
-        self.assertTrue(hasattr(pdf, 'ocr_page_idxs'))
+        self.assertTrue(hasattr(pdf, "ocr_page_idxs"))
 
         # Verify batch mode flag is set
         self.assertTrue(pdf._batch_mode)
 
-    @patch('pypdftotext.pdf_extract.AzureDocIntelIntegrator')
+    @patch("pypdftotext.pdf_extract.AzureDocIntelIntegrator")
     def test_ocr_method(self, mock_azure_class):
         """Test the public ocr() method."""
         config = PyPdfToTextConfig(
@@ -160,7 +160,7 @@ class TestPdfExtract(unittest.TestCase):
         config = PyPdfToTextConfig(
             overrides={
                 "DISABLE_PROGRESS_BAR": True,
-                "MIN_LINES_OCR_TRIGGER": 100,  # High threshold to mark pages for OCR
+                "MIN_LINES_OCR_TRIGGER": 1000,  # High threshold to mark pages for OCR
                 "DISABLE_OCR": False,
             }
         )
@@ -173,6 +173,7 @@ class TestPdfExtract(unittest.TestCase):
         self.assertIsInstance(pdf.ocr_page_idxs, list)
         # With high MIN_LINES_OCR_TRIGGER, some pages should be marked for OCR
         # (exact count depends on the PDF content)
+        assert bool(pdf.ocr_page_idxs), "No pages marked for OCR with 1000 line threshold."
 
     def test_replace_byte_codes(self):
         """Test custom glyph replacement parameter."""
