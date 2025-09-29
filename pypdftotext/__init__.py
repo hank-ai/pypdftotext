@@ -1,6 +1,6 @@
 """Extract text from pdf pages from codebehind or Azure OCR as required"""
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 import io
 import logging
@@ -11,6 +11,7 @@ from pypdf import PdfReader
 from . import layout
 from ._config import constants, PyPdfToTextConfig, PyPdfToTextConfigOverrides
 from .azure_docintel_integrator import AZURE_READ
+from .batch import PdfExtractBatch
 from .pdf_extract import PdfExtract
 
 
@@ -122,4 +123,5 @@ __all__ = [
     "PyPdfToTextConfig",
     "PyPdfToTextConfigOverrides",
     "PdfExtract",
+    "PdfExtractBatch",
 ]

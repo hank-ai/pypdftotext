@@ -107,6 +107,8 @@ class PdfExtract:
         self.compressed: bool = kwargs.get("compressed", False)
         self._extracted_pages: list[ExtractedPage] | None = kwargs.get("init_extracted_pages")
         self._azure: AzureDocIntelIntegrator | None = kwargs.get("azure")
+        self._batch_mode: bool = kwargs.get("_batch_mode", False)
+        self.ocr_page_idxs: list[int] = []
         self._reader: PdfReader | None = None
         self._writer: PdfWriter | None = None
         self._pbar: tqdm | None = None
@@ -264,24 +266,64 @@ class PdfExtract:
             leave=None,
         )
         pre_ocr = [self._embedded_text(page, page_index) for page_index, page in self._pbar]
-        result = [
+        self._extracted_pages = [
             ExtractedPage(pg, 0.0, txt if isinstance(txt, str) else "")
             for txt, pg in zip(pre_ocr, self.reader.pages)
         ]
-        ocr_page_idxs = [itm for itm in pre_ocr if isinstance(itm, int)]
+        self.ocr_page_idxs = [itm for itm in pre_ocr if isinstance(itm, int)]
         if self._azure:
             self._azure.config = self.config
         azure = AzureDocIntelIntegrator(self.config) if self._azure is None else self._azure
+
+        # Parallel Azure OCR API calls will be made later if in batch mode.
+        if not self._batch_mode:
+            self.ocr(azure)
+
+        # perform byte code substitutions per 'replace_byte_codes' arg
+        if self.replace_byte_codes:
+            replacements = [
+                (old_bytes.decode(), new_bytes.decode())
+                for old_bytes, new_bytes in self.replace_byte_codes.items()
+            ]
+            for ext_pg in self._extracted_pages:
+                if not ext_pg.text:
+                    continue
+                for old_, new_ in replacements:
+                    ext_pg.text = ext_pg.text.replace(old_, new_)
+
+        logger.info("Text extraction complete.")
+        return self._extracted_pages
+
+    def ocr(self, azure: AzureDocIntelIntegrator):
+        """
+        Run OCR on identified indices if the fraction of pages having fewer
+        than `self.config.MIN_LINES_OCR_TRIGGER` lines is greater than or equal to
+        `self.config.TRIGGER_OCR_PAGE_RATIO`. Updates the proper self.extracted_pages
+        entries with OCR'd text and handwritten ratios if OCR is triggered.
+        """
         rotated_pages = False  # track whether we rotated any pages and regenerate self.body if so.
         # do not OCR unless the number of pages requiring OCR / total pages exceeds a target ratio.
-        if len(ocr_page_idxs) / len(result) >= self.config.TRIGGER_OCR_PAGE_RATIO:
-            ocr_pages = azure.ocr_pages(self.body, ocr_page_idxs)
+        # Skip OCR if in batch mode (will be handled by batch processor)
+        if (
+            len(self.ocr_page_idxs) / len(self.extracted_pages)
+            >= self.config.TRIGGER_OCR_PAGE_RATIO
+        ):
+            # if not in batch mode, replacements are handled globally in _extract_pages.
+            if not self._batch_mode:
+                replacements = []
+            else:
+                replacements = [
+                    (old_bytes.decode(), new_bytes.decode())
+                    for old_bytes, new_bytes in (self.replace_byte_codes or {}).items()
+                ]
+
+            ocr_pages = azure.ocr_pages(self.body, self.ocr_page_idxs)
             if self.debug_path:
                 (self.debug_path / "ocr_pages.json").write_text(
                     json.dumps(ocr_pages, indent=2, default=str), "utf-8"
                 )
-            for ocr_idx, og_pg_idx in enumerate(ocr_page_idxs):
-                ext_pg = result[og_pg_idx]
+            for ocr_idx, og_pg_idx in enumerate(self.ocr_page_idxs):
+                ext_pg = self.extracted_pages[og_pg_idx]
                 txt = ocr_pages[ocr_idx]
                 if len(txt) > self.config.MAX_CHARS_PER_PDF_PAGE:
                     logger.warning(
@@ -293,33 +335,25 @@ class PdfExtract:
                     )
                     txt = ""
                 elif rotation := azure.rotation_degrees(og_pg_idx):
-                    rotated_pages = True
-                    ext_pg.page_obj.rotation += -90 * int(round(rotation / 90.0))
+                    # rotations can only be applied to pages in 90 degree increments.
+                    # do not report rotated content if applied rotation is 0.
+                    if applied_rotation := -90 * int(round(rotation / 90.0)):
+                        rotated_pages = True
+                        ext_pg.page_obj.rotation += applied_rotation
+
+                # perform byte code substitutions per 'replace_byte_codes' arg if in batch mode
+                if replacements and txt:
+                    for old_, new_ in replacements:
+                        txt = ext_pg.text.replace(old_, new_)
+
                 ext_pg.text = txt
                 ext_pg.source = "OCR"
                 ext_pg.handwritten_ratio = azure.handwritten_ratio(og_pg_idx)
                 ext_pg.azure_page = azure.page_at_index(og_pg_idx)
 
-        # perform byte code substitutions per 'replace_byte_codes' arg
-        if self.replace_byte_codes:
-            replacements = [
-                (old_bytes.decode(), new_bytes.decode())
-                for old_bytes, new_bytes in self.replace_byte_codes.items()
-            ]
-            for ext_pg in result:
-                if not ext_pg.text:
-                    continue
-                for old_, new_ in replacements:
-                    ext_pg.text = ext_pg.text.replace(old_, new_)
-
-        self._extracted_pages = result
-
         if rotated_pages:
             logger.debug("Regenerating PdfExtract body with corrected page orientations.")
             self._regenerate_body()
-
-        logger.info("Text extraction complete.")
-        return result
 
     def child(
         self,

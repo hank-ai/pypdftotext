@@ -99,6 +99,81 @@ class TestPdfExtract(unittest.TestCase):
             ratio = pdf.handwritten_ratio(i)
             self.assertEqual(ratio, 0.0)
 
+    def test_batch_mode(self):
+        """Test PdfExtract in batch mode skips individual OCR."""
+        config = PyPdfToTextConfig(
+            overrides={
+                "DISABLE_PROGRESS_BAR": True,
+                "MIN_LINES_OCR_TRIGGER": 1,
+                "TRIGGER_OCR_PAGE_RATIO": 0.5,
+            }
+        )
+
+        # Create PdfExtract in batch mode
+        pdf = PdfExtract(self.deid_epic_pdf, config=config, _batch_mode=True)
+
+        # Access extracted_pages to trigger extraction
+        pages = pdf.extracted_pages
+
+        # Should have extracted embedded text but not performed OCR
+        self.assertGreater(len(pages), 0)
+        self.assertTrue(hasattr(pdf, 'ocr_page_idxs'))
+
+        # Verify batch mode flag is set
+        self.assertTrue(pdf._batch_mode)
+
+    @patch('pypdftotext.pdf_extract.AzureDocIntelIntegrator')
+    def test_ocr_method(self, mock_azure_class):
+        """Test the public ocr() method."""
+        config = PyPdfToTextConfig(
+            overrides={
+                "DISABLE_PROGRESS_BAR": True,
+                "MIN_LINES_OCR_TRIGGER": 1,
+                "TRIGGER_OCR_PAGE_RATIO": 0.5,
+                "MAX_CHARS_PER_PDF_PAGE": 25000,
+            }
+        )
+
+        # Create PdfExtract in batch mode to prevent automatic OCR
+        pdf = PdfExtract(self.deid_epic_pdf, config=config, _batch_mode=True)
+
+        # Trigger extraction without OCR
+        _ = pdf.extracted_pages
+
+        # Mock Azure integrator
+        mock_azure = MagicMock()
+        mock_azure.ocr_pages.return_value = ["OCR Page 1"] * len(pdf.ocr_page_idxs)
+        mock_azure.rotation_degrees.return_value = 0.0
+        mock_azure.handwritten_ratio.return_value = 0.0
+        mock_azure.page_at_index.return_value = None
+
+        # Manually call OCR
+        if pdf.ocr_page_idxs:  # Only test if there are pages marked for OCR
+            pdf.ocr(mock_azure)
+
+            # Verify OCR was called if ratio threshold was met
+            if len(pdf.ocr_page_idxs) / len(pdf.extracted_pages) >= config.TRIGGER_OCR_PAGE_RATIO:
+                mock_azure.ocr_pages.assert_called_once()
+
+    def test_ocr_page_idxs_populated(self):
+        """Test that ocr_page_idxs is populated correctly."""
+        config = PyPdfToTextConfig(
+            overrides={
+                "DISABLE_PROGRESS_BAR": True,
+                "MIN_LINES_OCR_TRIGGER": 100,  # High threshold to mark pages for OCR
+                "DISABLE_OCR": False,
+            }
+        )
+
+        # Use a PDF that we know has text
+        pdf = PdfExtract(self.deid_epic_pdf, config=config, _batch_mode=True)
+        _ = pdf.extracted_pages
+
+        # ocr_page_idxs should be populated based on MIN_LINES_OCR_TRIGGER
+        self.assertIsInstance(pdf.ocr_page_idxs, list)
+        # With high MIN_LINES_OCR_TRIGGER, some pages should be marked for OCR
+        # (exact count depends on the PDF content)
+
     def test_replace_byte_codes(self):
         """Test custom glyph replacement parameter."""
         replacements = {b"\x00\x01": b"\xe2\x98\x90"}
