@@ -1,6 +1,6 @@
 """Extract text from pdf pages from codebehind or Azure OCR as required"""
 
-__version__ = "0.2.1"
+__version__ = "0.2.2"
 
 import io
 import logging
