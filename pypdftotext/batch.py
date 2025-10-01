@@ -9,6 +9,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed, Future
 from pathlib import Path
 
 from azure.core.exceptions import AzureError
+from botocore.exceptions import ClientError
 from pypdf import PdfReader
 from tqdm import tqdm
 
@@ -62,12 +63,68 @@ class PdfExtractBatch:
         self.kwargs = kwargs
         logger.info("Starting batch extraction for %s PDFs", len(self.pdfs))
         # Create the pdf extract objects but don't extract text until 'process' is called.
-        self.pdf_extracts = {
+        self.pdf_extracts, self.s3_errors = self._pull_s3_parallel()
+
+    def _pull_s3_parallel(self) -> tuple[dict[str, PdfExtract], dict[str, str]]:
+        """Parallelize calls to s3 if present. Returns a dict of extracts that were created
+        successfully and a dict of pdf name: s3 uri for failures"""
+        s3_uris = {
+            k: v for k, v in self.pdfs.items() if isinstance(v, str) and v.startswith("s3://")
+        }
+        pdf_extracts: dict[str, PdfExtract] = {
             pdf_name: PdfExtract(
                 pdf=pdf, config=self.config, **{**self.kwargs, "_batch_mode": True}
             )
             for pdf_name, pdf in self.pdfs.items()
+            if pdf_name not in s3_uris or len(s3_uris) == 1
         }
+        s3_errors = {}
+        if len(s3_uris) <= 1:
+            return pdf_extracts, {}
+        with ThreadPoolExecutor(
+            max_workers=min(len(s3_uris), self.kwargs.get("max_workers", 10))
+        ) as executor:
+
+            futures: list[Future[tuple[str, PdfExtract | ClientError]]] = []
+            for pdf_name, s3_uri in s3_uris.items():
+                futures.append(executor.submit(self._extract_from_s3_uri, (pdf_name, s3_uri)))
+
+            # Process results as they complete
+            pbar = tqdm(
+                as_completed(futures),
+                total=len(futures),
+                desc="Downloading Objects from S3",
+                disable=self.config.DISABLE_PROGRESS_BAR,
+                position=self.config.PROGRESS_BAR_POSITION,
+                leave=None,
+            )
+
+            for i, future in enumerate(pbar):
+                pdf_name, extract_or_error = future.result()
+                logger.debug("S3 Download Complete: %r (%s/%s)", pdf_name, i, len(s3_uris))
+                if isinstance(extract_or_error, ClientError):
+                    s3_errors[pdf_name] = extract_or_error
+                else:
+                    pdf_extracts[pdf_name] = extract_or_error
+        return pdf_extracts, s3_errors
+
+    def _extract_from_s3_uri(
+        self, s3_uri_tuple: tuple[str, str]
+    ) -> tuple[str, PdfExtract | ClientError]:
+        pdf_name, s3_uri = s3_uri_tuple
+        try:
+            extract = PdfExtract(
+                pdf=s3_uri, config=self.config, **{**self.kwargs, "_batch_mode": True}
+            )
+            return pdf_name, extract
+        except ClientError as e:
+            logger.error(
+                "S3 Download Error: %r failed, %s",
+                pdf_name,
+                e,
+                exc_info=logger.getEffectiveLevel() == logging.DEBUG,
+            )
+            return pdf_name, e
 
     def extract_all(self) -> dict[str, PdfExtract]:
         """Extract embedded text serially, then perform OCR operations in parallel."""
