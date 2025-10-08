@@ -81,7 +81,7 @@ class PdfExtractBatch:
         if len(s3_uris) <= 1:
             return pdf_extracts, {}
         with ThreadPoolExecutor(
-            max_workers=min(len(s3_uris), self.kwargs.get("max_workers", 10))
+            max_workers=min(len(s3_uris), self.config.MAX_WORKERS)
         ) as executor:
 
             futures: list[Future[tuple[str, PdfExtract | Exception]]] = []
@@ -184,7 +184,7 @@ class PdfExtractBatch:
 
         # Process PDFs in parallel using ThreadPoolExecutor
         with ThreadPoolExecutor(
-            max_workers=min(len(ocr_pdfs), self.kwargs.get("max_workers", 10))
+            max_workers=min(len(ocr_pdfs), self.config.MAX_WORKERS)
         ) as executor:
 
             futures: list[Future[tuple[str, PdfExtract]]] = []

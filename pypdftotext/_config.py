@@ -36,6 +36,7 @@ class PyPdfToTextConfigOverrides(TypedDict, total=False):
     MIN_OCR_ROTATION_DEGREES: float
     SUPPRESS_EMBEDDED_TEXT: bool
     REPLACE_BYTE_CODES: dict[bytes, bytes]
+    MAX_WORKERS: int
     OCR_HANDWRITTEN_CONFIDENCE_LIMIT: float
     AWS_ACCESS_KEY_ID: str | None
     AWS_SECRET_ACCESS_KEY: str | None
@@ -127,6 +128,9 @@ class _ConfigMixIn:
     """A series of byte code substitutions to make in the final extracted text,
     e.g. replacing pdf 'encoded font' checkbox representations with a standard
     unicode ☑ byte sequence."""
+    MAX_WORKERS: int = 10
+    """The maximum number of threads to initialize during PdfExtractBatch
+    parallel operations."""
     OCR_HANDWRITTEN_CONFIDENCE_LIMIT: float = 0.8
     """Azure must be at least this confident that a given span is handwritten
     in order for it to count when determining handwritten character percentage."""
