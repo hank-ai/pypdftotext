@@ -178,7 +178,9 @@ class TestPdfExtract(unittest.TestCase):
     def test_replace_byte_codes(self):
         """Test custom glyph replacement parameter."""
         replacements = {b"\x00\x01": b"\xe2\x98\x90"}
-        pdf = PdfExtract(self.deid_epic_pdf, replace_byte_codes=replacements)
+        pdf = PdfExtract(
+            self.deid_epic_pdf, PyPdfToTextConfig(overrides={"REPLACE_BYTE_CODES": replacements})
+        )
         # Just verify it doesn't crash
         self.assertIsInstance(pdf.text, str)
 
