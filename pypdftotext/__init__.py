@@ -22,7 +22,6 @@ def pdf_text_pages(
     pdf_reader: PdfReader | io.BytesIO | bytes,
     debug_path: Path | None = None,
     page_indices: list[int] | None = None,
-    replace_byte_codes: dict[bytes, bytes] | None = None,
     **kwargs,  # prevent errors due to bad args in upstream config dicts
 ) -> list[str]:
     """
@@ -43,11 +42,6 @@ def pdf_text_pages(
             Defaults to None.
         page_indices (list[int] | None): if provided, only extract text from
             the listed page indices. Default is None (extract all pages).
-        replace_byte_codes (dict[bytes, bytes] | None): if supplied, raw
-            text is cast to bytes, the dict keys are replaced with values,
-            and resulting bytes are cast back to text. Used to replace custom
-            glyphs defined in PDFs w/ (roughtly) equivalent unicode charcters,
-            e.g. 'anesthesia billing print set' checkbox handling.
 
     Returns:
         list[str]: a string of text extracted for each page
@@ -65,7 +59,6 @@ def pdf_text_pages(
         pdf_reader,
         config,
         debug_path=debug_path,
-        replace_byte_codes=replace_byte_codes,
         azure=AZURE_READ,
     )
     page_indices = page_indices or list(range(len(pdf_extract.extracted_pages)))
@@ -76,7 +69,6 @@ def pdf_text_page_lines(
     pdf_reader: PdfReader | io.BytesIO | bytes,
     debug_path: Path | None = None,
     page_indices: list[int] | None = None,
-    replace_byte_codes: dict[bytes, bytes] | None = None,
     **kwargs,  # prevent errors due to bad args in upstream config dicts
 ) -> list[list[str]]:
     """
@@ -97,20 +89,12 @@ def pdf_text_page_lines(
             Defaults to None.
         page_indices (list[int] | None): if provided, only extract text from
             the listed page indices. Default is None (extract all pages).
-        replace_byte_codes (dict[bytes, bytes] | None): if supplied, raw
-            text is cast to bytes, the dict keys are replaced with values,
-            and resulting bytes are cast back to text. Used to replace custom
-            glyphs defined in PDFs w/ (roughtly) equivalent unicode charcters,
-            e.g. 'anesthesia billing print set' checkbox handling.
 
     Returns:
         list[list[str]]: a list of lines of text extracted for each page
     """
     return [
-        pg.splitlines()
-        for pg in pdf_text_pages(
-            pdf_reader, debug_path, page_indices, replace_byte_codes, **kwargs
-        )
+        pg.splitlines() for pg in pdf_text_pages(pdf_reader, debug_path, page_indices, **kwargs)
     ]
 
 

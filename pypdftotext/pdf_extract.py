@@ -103,7 +103,6 @@ class PdfExtract:
         self.corruption_detected: bool = False
         self.body: bytes
         self.debug_path: Path | None = kwargs.get("debug_path")
-        self.replace_byte_codes: dict[bytes, bytes] | None = kwargs.get("replace_byte_codes")
         self.compressed: bool = kwargs.get("compressed", False)
         self._extracted_pages: list[ExtractedPage] | None = kwargs.get("init_extracted_pages")
         self._azure: AzureDocIntelIntegrator | None = kwargs.get("azure")
@@ -280,10 +279,10 @@ class PdfExtract:
             self.ocr(azure)
 
         # perform byte code substitutions per 'replace_byte_codes' arg
-        if self.replace_byte_codes:
+        if self.config.REPLACE_BYTE_CODES:
             replacements = [
                 (old_bytes.decode(), new_bytes.decode())
-                for old_bytes, new_bytes in self.replace_byte_codes.items()
+                for old_bytes, new_bytes in self.config.REPLACE_BYTE_CODES.items()
             ]
             for ext_pg in self._extracted_pages:
                 if not ext_pg.text:
@@ -314,7 +313,7 @@ class PdfExtract:
             else:
                 replacements = [
                     (old_bytes.decode(), new_bytes.decode())
-                    for old_bytes, new_bytes in (self.replace_byte_codes or {}).items()
+                    for old_bytes, new_bytes in (self.config.REPLACE_BYTE_CODES or {}).items()
                 ]
 
             ocr_pages = azure.ocr_pages(self.body, self.ocr_page_idxs)

@@ -9,7 +9,6 @@ from concurrent.futures import ThreadPoolExecutor, as_completed, Future
 from pathlib import Path
 
 from azure.core.exceptions import AzureError
-from botocore.exceptions import ClientError
 from pypdf import PdfReader
 from tqdm import tqdm
 
@@ -85,7 +84,7 @@ class PdfExtractBatch:
             max_workers=min(len(s3_uris), self.kwargs.get("max_workers", 10))
         ) as executor:
 
-            futures: list[Future[tuple[str, PdfExtract | ClientError]]] = []
+            futures: list[Future[tuple[str, PdfExtract | Exception]]] = []
             for pdf_name, s3_uri in s3_uris.items():
                 futures.append(executor.submit(self._extract_from_s3_uri, (pdf_name, s3_uri)))
 
@@ -102,7 +101,7 @@ class PdfExtractBatch:
             for i, future in enumerate(pbar):
                 pdf_name, extract_or_error = future.result()
                 logger.debug("S3 Download Complete: %r (%s/%s)", pdf_name, i, len(s3_uris))
-                if isinstance(extract_or_error, ClientError):
+                if isinstance(extract_or_error, Exception):
                     s3_errors[pdf_name] = extract_or_error
                 else:
                     pdf_extracts[pdf_name] = extract_or_error
@@ -110,14 +109,14 @@ class PdfExtractBatch:
 
     def _extract_from_s3_uri(
         self, s3_uri_tuple: tuple[str, str]
-    ) -> tuple[str, PdfExtract | ClientError]:
+    ) -> tuple[str, PdfExtract | Exception]:
         pdf_name, s3_uri = s3_uri_tuple
         try:
             extract = PdfExtract(
                 pdf=s3_uri, config=self.config, **{**self.kwargs, "_batch_mode": True}
             )
             return pdf_name, extract
-        except ClientError as e:
+        except Exception as e:  # pylint: disable=broad-exception-caught
             logger.error(
                 "S3 Download Error: %r failed, %s",
                 pdf_name,
