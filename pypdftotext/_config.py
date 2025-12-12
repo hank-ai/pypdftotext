@@ -153,7 +153,7 @@ class _ConfigMixIn:
     MIN_HEADER_FOOTER_PAGE_MATCH_RATIO: float = 0.6
     """Minimum calculated match ratio across all pages to consider a line a header or footer."""
     MIN_HEADER_FOOTER_LINE_MATCH_RATIO: float = 0.95
-    """Minimum match ratio between a specific line and a cannonical header/footer example line
+    """Minimum match ratio between a specific line and a canonical header/footer example line
     to consider the specific line as belonging to a header/footer."""
     MAX_HEADER_LINES: int = 0
     """Maximum number of lines from the top of each page to consider when detecting headers."""
