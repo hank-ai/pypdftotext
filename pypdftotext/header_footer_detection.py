@@ -32,17 +32,17 @@ def match_ratio(string_1: Sequence, string_2: Sequence, zero_if_empty=False) -> 
 
 def trim_leading_spaces(lines: list[str]) -> list[str]:
     """
-    Remove leading columns consisting only of spaces from a list of strings.
+    Remove the common minimum leading whitespace from all non-blank lines in a list of strings.
 
-    This function processes a list of strings, converts them to a character array,
-    and removes all leading columns that consist entirely of spaces. It returns
-    the modified list of strings with leading spaces removed.
+    This function finds the smallest number of leading spaces present in any non-blank line,
+    and removes that number of spaces from the start of every line. This is similar to
+    the behavior of textwrap.dedent.
 
     Args:
         lines (list[str]): The input list of strings to process.
 
     Returns:
-        list[str]: The list of strings with leading columns of spaces removed.
+        list[str]: The list of strings with the common leading whitespace removed.
 
     Example:
         >>> trim_leading_spaces(["    abc", "  def", "    ghi"])

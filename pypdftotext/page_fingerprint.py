@@ -53,7 +53,7 @@ class PageFingerprint:
 
         # sum below equals 0 if neither have resource children,
         # 1 if self does and value does not, and 2 if both do.
-        match sum((bool(self.resource_child_ids), bool(self.resource_child_ids))):
+        match sum((bool(self.resource_child_ids), bool(value.resource_child_ids))):
             case 0:
                 # neither has resource children. inconclusive, so do nothing.
                 return True
