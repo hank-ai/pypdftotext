@@ -6,17 +6,17 @@ import io
 import json
 import logging
 import re
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
-from azure.ai.documentintelligence.models import DocumentPage
 from pypdf import PdfReader, PdfWriter, PageObject
 from pypdf.generic import DictionaryObject, NullObject
 from tqdm import tqdm
 
 from ._config import PyPdfToTextConfig, PyPdfToTextConfigOverrides
 from .azure_docintel_integrator import AzureDocIntelIntegrator
+from .header_footer_detection import assign_headers_and_footers
+from .extracted_page import ExtractedPage
 
 
 try:
@@ -37,33 +37,6 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass
-class ExtractedPage:
-    """
-    Represents a single extracted page from a PDF with its metadata.
-
-    This dataclass encapsulates all information about a page after text extraction,
-    including the source of the text (embedded or OCR), handwritten content ratio,
-    and references to the underlying page objects.
-
-    Attributes:
-        page_obj: The pypdf PageObject instance for this page.
-        handwritten_ratio: Ratio of handwritten to total characters (0.0 to 1.0).
-            Always 0.0 for embedded text pages.
-        text: The extracted text content from the page.
-        source: Indicates whether text was extracted from embedded PDF content
-            ("embedded") or via OCR ("OCR").
-        azure_page: The Azure DocumentPage instance if this page was OCR'd,
-            None for embedded text pages.
-    """
-
-    page_obj: PageObject
-    handwritten_ratio: float
-    text: str
-    source: Literal["embedded", "OCR"] = "embedded"
-    azure_page: DocumentPage | None = None
 
 
 class PdfExtract:
@@ -289,8 +262,9 @@ class PdfExtract:
                     continue
                 for old_, new_ in replacements:
                     ext_pg.text = ext_pg.text.replace(old_, new_)
-
-        logger.info("Text extraction complete.")
+        self.assign_document_indices()
+        if not self._batch_mode:
+            assign_headers_and_footers(self.extracted_pages, self.config)
         return self._extracted_pages
 
     def ocr(self, azure: AzureDocIntelIntegrator):
@@ -548,3 +522,20 @@ class PdfExtract:
                 self.config.OCR_HANDWRITTEN_CONFIDENCE_LIMIT,
             )
         return self.extracted_pages[page_index].handwritten_ratio
+
+    def assign_document_indices(self):
+        """
+        Dynamically sets the document_idx attribute of all extracted pages.
+
+        Heuristically determines which pages share a common ancestor PDF. Used
+        for header / footer stripping. See page_fingerprint.py.
+        """
+        document_idx = 0
+        current_fp = self.extracted_pages[0].fingerprint
+        self.extracted_pages[0].document_idx = document_idx
+        for i in range(1, len(self.extracted_pages)):
+            if self.extracted_pages[i].fingerprint != current_fp:
+                # End of current document
+                document_idx += 1
+                current_fp = self.extracted_pages[i].fingerprint
+            self.extracted_pages[i].document_idx = document_idx

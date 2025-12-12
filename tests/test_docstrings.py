@@ -75,6 +75,20 @@ class DocstringTests(unittest.TestCase):
 
         self.assertEqual(results.failed, 0, f"Doctests failed in layout module: {results}")
 
+    def test_header_footer_detection_module_doctests(self):
+        """Test all doctests in the header_footer_detection module."""
+        import pypdftotext.header_footer_detection
+
+        results = doctest.testmod(
+            pypdftotext.header_footer_detection,
+            optionflags=doctest.NORMALIZE_WHITESPACE,
+            verbose=False,
+        )
+
+        self.assertEqual(
+            results.failed, 0, f"Doctests failed in header_footer_detection module: {results}"
+        )
+
     def test_main_module_doctests(self):
         """Test all doctests in the main pypdftotext module."""
         results = doctest.testmod(

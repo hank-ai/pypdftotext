@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "Bash(python -m pytest tests/test_batch.py -v)",
-      "Bash(python -m pytest tests/test_pdf_extract.py -v)"
+      "Bash(python -m pytest tests/test_pdf_extract.py -v)",
+      "Bash(python -m pytest tests/test_docstrings.py::DocstringTests::test_header_footer_detection_module_doctests -xvs)"
     ],
     "deny": [],
     "ask": []
