@@ -41,6 +41,11 @@ class PyPdfToTextConfigOverrides(TypedDict, total=False):
     AWS_ACCESS_KEY_ID: str | None
     AWS_SECRET_ACCESS_KEY: str | None
     AWS_SESSION_TOKEN: str | None
+    MIN_HEADER_FOOTER_PAGE_MATCH_RATIO: float
+    MIN_HEADER_FOOTER_LINE_MATCH_RATIO: float
+    MAX_HEADER_LINES: int
+    MAX_FOOTER_LINES: int
+    RETAIN_CONTINUED_HEADINGS: bool
 
 
 @dataclass(kw_only=True)
@@ -145,6 +150,18 @@ class _ConfigMixIn:
     AWS_SESSION_TOKEN: str | None = field(default_factory=lambda: os.getenv("AWS_SESSION_TOKEN"))
     """AWS session token for the credentials that will be used to pull source
     PDFs from S3 if installed with "s3" extra (`pip install pypdftotext["s3"]`)"""
+    MIN_HEADER_FOOTER_PAGE_MATCH_RATIO: float = 0.6
+    """Minimum calculated match ratio across all pages to consider a line a header or footer."""
+    MIN_HEADER_FOOTER_LINE_MATCH_RATIO: float = 0.95
+    """Minimum match ratio between a specific line and a canonical header/footer example line
+    to consider the specific line as belonging to a header/footer."""
+    MAX_HEADER_LINES: int = 0
+    """Maximum number of lines from the top of each page to consider when detecting headers."""
+    MAX_FOOTER_LINES: int = 0
+    """Maximum number of lines from the bottom of each page to consider when detecting footers."""
+    RETAIN_CONTINUED_HEADINGS: bool = True
+    """Set to False to remove '(continued)' section and table headings. Helpful for logical
+    parsing operations."""
 
     def __post_init__(self):
         self._initialized_ = True

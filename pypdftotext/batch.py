@@ -14,6 +14,7 @@ from tqdm import tqdm
 
 from ._config import PyPdfToTextConfig
 from .azure_docintel_integrator import AzureDocIntelIntegrator
+from .header_footer_detection import assign_headers_and_footers
 from .pdf_extract import PdfExtract
 
 
@@ -139,7 +140,8 @@ class PdfExtractBatch:
                 e,
                 exc_info=logger.getEffectiveLevel() == logging.DEBUG,
             )
-
+        for extract in self.pdf_extracts.values():
+            assign_headers_and_footers(extract.extracted_pages, self.config)
         logger.info("Batch extraction complete for %s PDFs", len(self.pdf_extracts))
         return self.pdf_extracts
 
