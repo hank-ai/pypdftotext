@@ -6,8 +6,6 @@ from collections.abc import Sequence
 from difflib import SequenceMatcher
 from itertools import pairwise
 
-import numpy as np
-
 from ._config import PyPdfToTextConfig
 from .extracted_page import ExtractedPage
 
@@ -215,10 +213,8 @@ def header_footer_test_lines(
     for page in extracted_pages:
         split_lines = [line for line in page.text.strip().splitlines() if line.strip()]
         head = split_lines[:max_header_lines]
-        waist: list[str] = []
         feet = split_lines[-max_footer_lines:] if max_footer_lines != 0 else []
-        while len(head) + len(feet) + len(waist) < max_header_lines + max_footer_lines:
-            waist += [""]
+        waist = [""] * (max_header_lines + max_footer_lines - len(head) - len(feet))
         head.extend(waist)
         head.extend(feet)  # we got a body here!
         tests_by_docidx[page.document_idx].append(head)
@@ -280,72 +276,60 @@ def find_model_headers_and_footers(
         True
     """
     config = config or PyPdfToTextConfig()
-    min_page_match_ratio = config.MIN_HEADER_FOOTER_PAGE_MATCH_RATIO
-    max_header_lines = config.MAX_HEADER_LINES
-    max_footer_lines = config.MAX_FOOTER_LINES
+    if config.MAX_HEADER_LINES + config.MAX_FOOTER_LINES == 0:
+        return {}
     header_footer_lines: dict[int, dict[int, str]] = {}
-    if max_header_lines + max_footer_lines == 0:
-        return header_footer_lines
     for doc_idx, line_lists in header_footer_test_lines(
-        extracted_pages, max_header_lines, max_footer_lines
+        extracted_pages, config.MAX_HEADER_LINES, config.MAX_FOOTER_LINES
     ).items():
-        # stack the first max_header_lines and last max_footer_lines into
-        # an array, rotate it clockwise 90deg and then flip it vertically.
-        # the resulting `lines_from_all_pages_by_index` is of form
+        # Transpose line_lists so that lines at the same index across all pages
+        # are grouped together. The resulting `lines_from_all_pages_aligned_by_index`
+        # is of form:
         # [
-        #   [page 1/line 1, page 2/line 1, ..., page n/line 1],
-        #   [page 1/line 2, page 2/line 2, ..., page n/line 2],
+        #   (page 1/line 1, page 2/line 1, ..., page n/line 1),
+        #   (page 1/line 2, page 2/line 2, ..., page n/line 2),
         #       ...
-        #   [page 1/line max_header_lines, page 2/line max_header_lines, ...],
-        #   [page 1/line -max_footer_lines, page 2/line -max_footer_lines, ...],
+        #   (page 1/line MAX_HEADER_LINES, page 2/line MAX_HEADER_LINES, ...),
+        #   (page 1/line -MAX_FOOTER_LINES, page 2/line -MAX_FOOTER_LINES, ...),
         #       ...
-        #   [page 1/line n-1, page 2/line n-1, ..., page n/line n-1],
-        #   [page 1/line n, page 2/line n, ..., page n/line n],
+        #   (page 1/line n-1, page 2/line n-1, ..., page n/line n-1),
+        #   (page 1/line n, page 2/line n, ..., page n/line n),
         # ]
-        lines_from_all_pages_aligned_by_index = np.flipud(np.rot90(np.stack(line_lists)))
-        # perform a pairwise comparison of the lines at each line index across all
-        # pages using match_ratio.
-        # output is an array of floats of length max_header_lines + max_footer_lines
+        lines_from_all_pages_aligned_by_index = list(zip(*line_lists))
+        # Perform pairwise comparison of lines at each line index across all pages,
+        # storing pairs with their match_ratio scores for reuse.
+        line_pair_scores: list[list[tuple[tuple[str, str], float]]] = [
+            [
+                ((x, y), match_ratio(x.replace(" ", ""), y.replace(" ", ""), True))
+                for x, y in pairwise(line_for_each_page)
+            ]
+            for line_for_each_page in lines_from_all_pages_aligned_by_index
+        ]
+        # Derive page_match_ratios from stored scores.
+        # Output is a list of floats of length MAX_HEADER_LINES + MAX_FOOTER_LINES
         # having values of sum(match_ratios)/(pairs compared).
-        page_match_ratios = np.apply_along_axis(
-            lambda line_for_each_page: sum(
-                match_ratio(x, y, True) / (len(line_for_each_page) - 1)
-                for x, y in pairwise(np.char.replace(line_for_each_page, " ", ""))
-            ),
-            1,
-            lines_from_all_pages_aligned_by_index,
-        )
+        page_match_ratios = [
+            sum(score for _, score in pairs) / len(pairs) if pairs else 0.0
+            for pairs in line_pair_scores
+        ]
         # collect header indices as positive ints, and...
         header_footer_idxs = [
             idx
-            for idx, ratio in enumerate(page_match_ratios[:max_header_lines])
-            if ratio > min_page_match_ratio
+            for idx, ratio in enumerate(page_match_ratios[: config.MAX_HEADER_LINES])
+            if ratio > config.MIN_HEADER_FOOTER_PAGE_MATCH_RATIO
         ]
         # ...footer indices as negative ints.
         header_footer_idxs.extend(
             [
                 idx
-                for idx, ratio in zip(
-                    range(-max_footer_lines, 0, 1), page_match_ratios[-max_footer_lines:]
-                )
-                if ratio > min_page_match_ratio
+                for idx in range(-config.MAX_FOOTER_LINES, 0, 1)
+                if page_match_ratios[idx] > config.MIN_HEADER_FOOTER_PAGE_MATCH_RATIO
             ]
         )
+        # Find the best representative line for each header/footer index by
+        # selecting the first element of the pair with the highest match_ratio.
         header_footer_lines[doc_idx] = {
-            # perform pairwise comparison of lines at each selected header/
-            # footer index and return the first item in the pair with the
-            # highest match_ratio to guarantee the returned value was in
-            # the set of matches (up to 40% of the lines may not be in our
-            # matched set and slight variation is allowed for matched entries,
-            # so "most_freq_element" isn't sufficient).
-            idx: str(
-                sorted(
-                    pairwise(lines_from_all_pages_aligned_by_index[idx]),
-                    key=lambda x_y: match_ratio(
-                        x_y[0].replace(" ", ""), x_y[1].replace(" ", ""), True
-                    ),
-                )[-1][0]
-            )
+            idx: max(line_pair_scores[idx], key=lambda x: x[1])[0][0]
             for idx in header_footer_idxs
         }
         logger.debug(
