@@ -79,7 +79,7 @@ class _ConfigMixIn:
     AZURE_DOCINTEL_TIMEOUT: int = 60
     """How long to wait for Azure OCR results before timing out. Default is 60."""
     AZURE_DOCINTEL_MODEL: Literal["prebuilt-read", "prebuilt-layout"] = "prebuilt-read"
-    """The value to use for the 'model' parameter when calling the Azure API"""
+    """The value to use for the 'model_id' parameter when calling the Azure API"""
     DISABLE_OCR: bool = False
     """Set to True to disable all OCR operations and return 'code behind' text
     only."""
