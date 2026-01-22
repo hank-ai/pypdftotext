@@ -2,9 +2,13 @@
 
 import logging
 import math
-from itertools import groupby
+from itertools import chain, groupby
 
-from azure.ai.documentintelligence.models import DocumentLine, DocumentPage
+from azure.ai.documentintelligence.models import (
+    DocumentLine,
+    DocumentPage,
+    DocumentSelectionMark,
+)
 
 from ._config import constants, PyPdfToTextConfig
 
@@ -12,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 
 def rotated_bbox(
-    line: DocumentLine,
+    line: DocumentLine | DocumentSelectionMark,
     page: DocumentPage,
     min_ocr_rotation_degrees: float = constants.MIN_OCR_ROTATION_DEGREES,
 ) -> list[float]:
@@ -21,7 +25,7 @@ def rotated_bbox(
     reported for the page.
 
     Args:
-        line: an Azure DocumentLine instance
+        line: an Azure DocumentLine or DocumentSelectionMark instance
         page: an Azure DocumentPage instance
         min_ocr_rotation_degrees: min reported rotation to apply.
 
@@ -87,7 +91,8 @@ class CharGroup:
     splitting when pages have rotation angles.
 
     Args:
-        line: an Azure DocumentLine instance
+        line: an Azure DocumentLine or DocumentSelectionMark instance. If a
+            DocumentSelectionMark, renders as "✅" (selected) or "☐" (unselected).
         page: an Azure DocumentPage instance
         config: a PyPdfToTextConfig instance inherits from global base config
             `constants` by default. See PyPdfToTextConfig docstring for more info.
@@ -102,7 +107,7 @@ class CharGroup:
 
     def __init__(
         self,
-        line: DocumentLine,
+        line: DocumentLine | DocumentSelectionMark,
         page: DocumentPage,
         config: PyPdfToTextConfig | None = None,
     ) -> None:
@@ -113,7 +118,10 @@ class CharGroup:
         self.tx: float = bbox[0] * config.OCR_POSITIONING_SCALE
         self.ty: float = bbox[1] * config.OCR_POSITIONING_SCALE
         self.effective_height: float = (bbox[-1] - bbox[1]) * config.OCR_LINE_HEIGHT_SCALE
-        self.text: str = line.content
+        if isinstance(line, DocumentLine):
+            self.text: str = line.content
+        else:
+            self.text = "✅" if line.state == "selected" else "☐"
         self.displaced_tx: float = bbox[2] * config.OCR_POSITIONING_SCALE
 
     def offset_x_coords(self, offset: float) -> "CharGroup":
@@ -211,7 +219,6 @@ def fixed_char_width(groups: list[CharGroup], scale_weight: float = 1.25) -> flo
 
     Returns:
         float: fixed character width
-
     """
     char_widths = []
     for _group in groups:
@@ -225,6 +232,10 @@ def fixed_width_page(page: DocumentPage, config: PyPdfToTextConfig | None = None
     Generate structured page text from a DocumentPage object in an Azure Document
     Intelligence response.
 
+    Processes both text lines and selection marks (checkboxes) from the page. Selection
+    marks are rendered as "✅" (selected) or "☐" (unselected) and are filtered by the
+    `OCR_SELECTION_MARK_CONFIDENCE_LIMIT` config parameter.
+
     Args:
         page: an Azure DocumentPage instance
         config: a PyPdfToTextConfig instance that inherits from the global base config
@@ -233,13 +244,21 @@ def fixed_width_page(page: DocumentPage, config: PyPdfToTextConfig | None = None
     Returns:
         str: page text in a fixed width format that closely adheres to the rendered
             layout in the source pdf.
-
     """
     config = config or PyPdfToTextConfig()
     if not page.lines:
         return ""
+
     groups = dedented_groups(
-        [CharGroup(_line, page, config) for _line in page.lines or [] if _line.polygon is not None]
+        [
+            CharGroup(_line, page, config)
+            for _line in chain(page.lines or [], page.selection_marks or [])
+            if _line.polygon is not None
+            and (
+                isinstance(_line, DocumentLine)
+                or _line.confidence >= config.OCR_SELECTION_MARK_CONFIDENCE_LIMIT
+            )
+        ]
     )
     ty_groups = y_coordinate_groups(groups)
     char_width = fixed_char_width(groups)

@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import dataclass, InitVar, field
-from typing import cast, Any, TypedDict
+from typing import cast, Any, Literal, TypedDict
 
 
 logger = logging.getLogger(__name__)
@@ -22,6 +22,7 @@ class PyPdfToTextConfigOverrides(TypedDict, total=False):
     AZURE_DOCINTEL_SUBSCRIPTION_KEY: str
     AZURE_DOCINTEL_AUTO_CLIENT: bool
     AZURE_DOCINTEL_TIMEOUT: int
+    AZURE_DOCINTEL_MODEL: Literal["prebuilt-read", "prebuilt-layout"]
     DISABLE_OCR: bool
     DISABLE_PROGRESS_BAR: bool
     PROGRESS_BAR_POSITION: int | None
@@ -38,6 +39,7 @@ class PyPdfToTextConfigOverrides(TypedDict, total=False):
     REPLACE_BYTE_CODES: dict[bytes, bytes]
     MAX_WORKERS: int
     OCR_HANDWRITTEN_CONFIDENCE_LIMIT: float
+    OCR_SELECTION_MARK_CONFIDENCE_LIMIT: float
     AWS_ACCESS_KEY_ID: str | None
     AWS_SECRET_ACCESS_KEY: str | None
     AWS_SESSION_TOKEN: str | None
@@ -76,6 +78,8 @@ class _ConfigMixIn:
     upon first use."""
     AZURE_DOCINTEL_TIMEOUT: int = 60
     """How long to wait for Azure OCR results before timing out. Default is 60."""
+    AZURE_DOCINTEL_MODEL: Literal["prebuilt-read", "prebuilt-layout"] = "prebuilt-read"
+    """The value to use for the 'model' parameter when calling the Azure API"""
     DISABLE_OCR: bool = False
     """Set to True to disable all OCR operations and return 'code behind' text
     only."""
@@ -139,6 +143,9 @@ class _ConfigMixIn:
     OCR_HANDWRITTEN_CONFIDENCE_LIMIT: float = 0.8
     """Azure must be at least this confident that a given span is handwritten
     in order for it to count when determining handwritten character percentage."""
+    OCR_SELECTION_MARK_CONFIDENCE_LIMIT: float = 0.8
+    """Azure must be at least this confident that a given span is a selection mark
+    in order for it to be rendered alongside standard text output."""
     AWS_ACCESS_KEY_ID: str | None = field(default_factory=lambda: os.getenv("AWS_ACCESS_KEY_ID"))
     """AWS access key ID for the credentials that will be used to pull source
     PDFs from S3 if installed with "s3" extra (`pip install pypdftotext["s3"]`)"""
