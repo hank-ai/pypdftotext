@@ -81,7 +81,7 @@ class AzureDocIntelIntegrator:
         assert self.client is not None
         logger.info("Sending pdf of %s bytes for OCR of %s pages.", len(pdf), len(pages))
         poller: AnalyzeDocumentLROPoller = self.client.begin_analyze_document(
-            model_id="prebuilt-read",
+            model_id=self.config.AZURE_DOCINTEL_MODEL,
             body=io.BytesIO(pdf),
             pages=",".join(str(pg + 1) for pg in pages),
         )
@@ -131,7 +131,8 @@ class AzureDocIntelIntegrator:
             # offset + length as the page end.
             page_start = min(span.offset for span in _selected_page.spans)
             page_end = max(span.offset + span.length for span in _selected_page.spans)
-            if page_end - page_start <= 0:
+            page_length = page_end - page_start
+            if page_length <= 0:
                 # whoops! something's wrong. We should probably throw an exception here, but
                 # we'll fail open for now as it fits our use case.
                 logger.warning(
@@ -155,9 +156,17 @@ class AzureDocIntelIntegrator:
                 ),
                 start=0,
             )
+            # Now we'll account for selection marks since prebuilt-layout output replaces
+            # checkboxes and the like with ':selected:' or ':unselected:' and includes this
+            # unrendered text in span offsets (like an asshole).
+            page_length_reduction = sum(
+                sel.span.length for sel in _selected_page.selection_marks or []
+            )
+            # finally, we'll ignore newline chars that occur in the page span
+            page_length_reduction += self.last_result.content[page_start:page_end].count("\n")
             # Guess we'll cap our value at 1.0. We should probably throw and exception here
-            # also, but again we'll fail open for now as it suites our use case.
-            ratio = handwritten_length / (page_end - page_start)
+            # also, but again we'll fail open for now as it suits our use case.
+            ratio = handwritten_length / (page_end - page_start - page_length_reduction)
             if ratio > 1.0:
                 logger.warning("Handwritten ratio of page index at %s capped at 1.0", page_index)
                 return 1.0

@@ -13,12 +13,12 @@ pypdftotext is a Python package that intelligently extracts text from PDF files.
 - 🚀 **Fast embedded text extraction** using pypdf's layout mode
 - 🔄 **Automatic OCR fallback** via Azure Document Intelligence when needed
 - 🚛 **Batch processing** with parallel OCR for multiple PDFs
-- 🧵 **Thread-safe operations** with the `PdfExtract` class
+- 🧵 **Stateful extraction** with the `PdfExtract` class
 - 📦 **S3 support** for reading PDFs directly from AWS S3
 - 🖼️ **Image compression** to reduce PDF file sizes
 - ✍️ **Handwritten text detection** with confidence scoring
 - 📄 **Page manipulation** - create child PDFs and extract page subsets
-- ⚙️ **Flexible Configuration** with built in env support multiple inheritance options
+- ⚙️ **Flexible configuration** with built-in env support and multiple inheritance options
 
 ## Installation
 
@@ -40,7 +40,7 @@ pip install "pypdftotext[image]"
 # For all optional features (s3 and pillow)
 pip install "pypdftotext[full]"
 
-# For development (full + boto3-types[s3], pytest, pytest-cov)
+# For development (full + boto3-stubs[s3], pytest, pytest-cov)
 pip install "pypdftotext[dev]"
 ```
 
@@ -116,13 +116,13 @@ for i, page_text in enumerate(extract.text_pages):
 
 #### Compress Images in Scanned PDFs to Reduce File Size or Improve OCR
 
-> NOTE: Requires the optional `pypdftotext[images]` installation.
+> NOTE: Requires the optional `pypdftotext[image]` installation.
 
 > NOTE: Perform this step _before_ accessing text/text_pages to use the compressed PDF for OCR. Otherwise, text will already be extracted from the original version and will not be re-extracted.
 
 ```python
 extract.compress_images(  # always converts images to greyscale
-    white_point = 200,  # pixels with values from 201 to 255 are set to 256 (aka white) to remove scanner artifacts
+    white_point = 200,  # pixels with values from 201 to 255 are set to 255 (white) to remove scanner artifacts
     aspect_tolerance=0.01,  # resizes images whose aspect ratios (width/height) are within 0.01 of the page aspect ratio
     max_overscale = 1.5,  # images having a width more than 1.5x the displayed width of the PDF page are downsampled to 1.5x
 )
@@ -177,13 +177,15 @@ If an S3 URI (e.g. `s3://my-bucket/path/to/document.pdf`) is supplied as the `pd
 
 OCR is automatically triggered when:
 1. The ratio of low-text pages exceeds `TRIGGER_OCR_PAGE_RATIO` (default: 99% of pages)
-2. A page is considered "low-text" if it has ≤ `MIN_LINES_OCR_TRIGGER` lines (default: 1)
+2. A page is considered "low-text" if it has < `MIN_LINES_OCR_TRIGGER` lines (default: 1)
 
 Example: OCR only when 50% of pages have fewer than 5 lines:
 ```python
 config = PyPdfToTextConfig(
-    MIN_LINES_OCR_TRIGGER=5,
-    TRIGGER_OCR_PAGE_RATIO=0.5
+    overrides={
+        "MIN_LINES_OCR_TRIGGER": 5,
+        "TRIGGER_OCR_PAGE_RATIO": 0.5,
+    }
 )
 ```
 
