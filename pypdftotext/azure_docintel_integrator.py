@@ -160,12 +160,7 @@ class AzureDocIntelIntegrator:
             # checkboxes and the like with ':selected:' or ':unselected:' and includes this
             # unrendered text in span offsets (like an asshole).
             page_length_reduction = sum(
-                (
-                    10  # 10 chars in ':selected:'
-                    if sel.state == "selected"
-                    else 12  # 12 chars in ':unselected:'
-                )
-                for sel in _selected_page.selection_marks or []
+                sel.span.length for sel in _selected_page.selection_marks or []
             )
             # finally, we'll ignore newline chars that occur in the page span
             page_length_reduction += self.last_result.content[page_start:page_end].count("\n")
