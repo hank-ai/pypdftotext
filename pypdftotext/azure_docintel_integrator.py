@@ -131,14 +131,23 @@ class AzureDocIntelIntegrator:
             # offset + length as the page end.
             page_start = min(span.offset for span in _selected_page.spans)
             page_end = max(span.offset + span.length for span in _selected_page.spans)
-            page_length = page_end - page_start
+            # Now we'll account for selection marks since prebuilt-layout output replaces
+            # checkboxes and the like with ':selected:' or ':unselected:' and includes this
+            # unrendered text in span offsets (like an asshole).
+            page_length_reduction = sum(
+                sel.span.length for sel in _selected_page.selection_marks or []
+            )
+            # finally, we'll ignore newline chars that occur in the page span
+            page_length_reduction += self.last_result.content[page_start:page_end].count("\n")
+            page_length = page_end - page_start - page_length_reduction
             if page_length <= 0:
                 # whoops! something's wrong. We should probably throw an exception here, but
                 # we'll fail open for now as it fits our use case.
                 logger.warning(
                     "Error calculating handwritten ratio for page at index %s:"
-                    " page span start (%s) >= end (%s)",
+                    " page span length reduction (%s) + start (%s) >= end (%s)",
                     page_index,
+                    page_length_reduction,
                     page_start,
                     page_end,
                 )
@@ -156,17 +165,9 @@ class AzureDocIntelIntegrator:
                 ),
                 start=0,
             )
-            # Now we'll account for selection marks since prebuilt-layout output replaces
-            # checkboxes and the like with ':selected:' or ':unselected:' and includes this
-            # unrendered text in span offsets (like an asshole).
-            page_length_reduction = sum(
-                sel.span.length for sel in _selected_page.selection_marks or []
-            )
-            # finally, we'll ignore newline chars that occur in the page span
-            page_length_reduction += self.last_result.content[page_start:page_end].count("\n")
             # Guess we'll cap our value at 1.0. We should probably throw and exception here
             # also, but again we'll fail open for now as it suits our use case.
-            ratio = handwritten_length / (page_end - page_start - page_length_reduction)
+            ratio = handwritten_length / page_length
             if ratio > 1.0:
                 logger.warning("Handwritten ratio of page index at %s capped at 1.0", page_index)
                 return 1.0
