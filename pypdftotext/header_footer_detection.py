@@ -329,8 +329,7 @@ def find_model_headers_and_footers(
         # Find the best representative line for each header/footer index by
         # selecting the first element of the pair with the highest match_ratio.
         header_footer_lines[doc_idx] = {
-            idx: max(line_pair_scores[idx], key=lambda x: x[1])[0][0]
-            for idx in header_footer_idxs
+            idx: max(line_pair_scores[idx], key=lambda x: x[1])[0][0] for idx in header_footer_idxs
         }
         logger.debug(
             "\n*******************************************\n"
@@ -366,7 +365,18 @@ def assign_headers_and_footers(
     """
     config = config or PyPdfToTextConfig()
     model_headers_footers = find_model_headers_and_footers(extracted_pages, config)
-    for page in extracted_pages:
+    first_doc_idx_pages = {}
+    last_doc_idx_pages = defaultdict(int)
+    for idx, page in enumerate(extracted_pages):
+        if page.document_idx not in first_doc_idx_pages:
+            first_doc_idx_pages[page.document_idx] = idx
+        if last_doc_idx_pages[page.document_idx] < idx:
+            last_doc_idx_pages[page.document_idx] = idx
+    for idx, page in enumerate(extracted_pages):
         if page.document_idx not in model_headers_footers:
             continue
         header_footer_update(page, model_headers_footers[page.document_idx], config)
+        if first_doc_idx_pages[page.document_idx] == idx:
+            page.text = f"{page.header}\n{page.text}"
+        if last_doc_idx_pages[page.document_idx] == idx:
+            page.text = f"{page.text}\n{page.footer}"

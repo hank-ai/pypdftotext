@@ -5,6 +5,7 @@ from typing import Literal
 
 from azure.ai.documentintelligence.models import DocumentPage
 from pypdf import PageObject
+from pypdf.generic import RectangleObject
 
 from .page_fingerprint import PageFingerprint
 
@@ -48,3 +49,12 @@ class ExtractedPage:
 
     def __post_init__(self):
         self.fingerprint = PageFingerprint.from_page(self.page_obj)
+
+    @property
+    def landscape(self) -> bool:
+        """Is the page in landscape orientation? True or False."""
+        mb = RectangleObject(self.page_obj.mediabox)
+        if mb.height < mb.width:
+            return self.page_obj.rotation % 180 == 0
+        else:
+            return self.page_obj.rotation % 180 != 0

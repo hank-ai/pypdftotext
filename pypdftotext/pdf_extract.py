@@ -6,8 +6,9 @@ import io
 import json
 import logging
 import re
+from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, overload
 
 from pypdf import PdfReader, PdfWriter, PageObject
 from pypdf.generic import DictionaryObject, NullObject
@@ -157,7 +158,8 @@ class PdfExtract:
             if self._extracted_pages:
                 self._writer = PdfWriter()
                 self._writer.append(
-                    self.reader, pages=[ext_pg.page_obj for ext_pg in self._extracted_pages]
+                    self.reader,
+                    pages=[ext_pg.page_obj for ext_pg in self._extracted_pages],
                 )
             else:
                 self._writer = PdfWriter(clone_from=self.reader)
@@ -334,30 +336,171 @@ class PdfExtract:
             logger.debug("Regenerating PdfExtract body with corrected page orientations.")
             self._regenerate_body()
 
+    @overload
+    def remove_pages(self, remove: Callable[[ExtractedPage], bool]):
+        """
+        Run the 'remove' test function on all extracted pages and remove
+        all pages for which the test returns *True*.
+
+        Automatically regenerates the PDF body if any pages were removed.
+
+        Args:
+            remove (Callable[[ExtractedPage], bool]): Runs on every page. Pages
+                returning True are removed.
+        """
+
+    @overload
+    def remove_pages(self, remove: list[int]):
+        """
+        Remove pages at the indices supplied in 'remove'.
+
+        Automatically regenerates the PDF body if any pages were removed.
+
+        Args:
+            remove (list[int]): The indices to remove.
+        """
+
+    @overload
+    def remove_pages(self, remove: tuple[int, int]):
+        """
+        Remove pages between the supplied indices *inclusive*.
+
+        Automatically regenerates the PDF body if any pages were removed.
+
+        Args:
+            remove (tuple[int, int]): The start and end index of the pages to remove.
+        """
+
+    def remove_pages(self, remove: Callable[[ExtractedPage], bool] | list[int] | tuple[int, int]):
+        """
+        Run 'remove' on all extracted pages and remove all pages for which
+        the test returns True.
+
+        Automatically regenerates the PDF body if any pages were removed.
+
+        Args:
+            remove (Callable | list | tuple): Pages to remove.
+        """
+        starting_len = len(self.extracted_pages)
+        if callable(remove):
+            self._extracted_pages = [page for page in self.extracted_pages if not remove(page)]
+        elif isinstance(remove, list):
+            self._extracted_pages = [
+                page for i, page in enumerate(self.extracted_pages) if i not in remove
+            ]
+        elif isinstance(remove, tuple) and len(remove) == 2:
+            self._extracted_pages = [
+                page
+                for i, page in enumerate(self.extracted_pages)
+                if i < remove[0] or i > remove[1]
+            ]
+        else:
+            if isinstance(remove, tuple):
+                raise ValueError(f"Improper tuple input {remove=}. Expected length 2.")
+            raise TypeError(f"Invalid {type(remove)=}")
+        if len(self.extracted_pages) < starting_len:
+            self._regenerate_body()
+
+    @overload
     def child(
         self,
-        page_indices: list[int] | tuple[int, int] | None = None,
+        page_indices: Callable[[ExtractedPage], bool],
         config_overrides: PyPdfToTextConfigOverrides | None = None,
+        remove_from_parent: bool = False,
+    ) -> PdfExtract | None:
+        """
+        Run the 'page_indices' test function on all extracted pages and include
+        all pages for which the test returns *True*.
+
+        Args:
+            page_indices (Callable[[ExtractedPage], bool]): Runs on every page. Pages
+                returning True are included.
+            config_overrides (PyPdfToTextConfigOverrides | None): settings to override in the
+                child instance.
+            remove_from_parent (bool): If True, remove the selected pages from the parent
+                instance after creating the child. Defaults to False.
+
+        Returns:
+            PdfExtract | None: a child instance containing the pages specified or
+                None if the supplied parameters do not identify any child pages.
+        """
+
+    @overload
+    def child(
+        self,
+        page_indices: list[int],
+        config_overrides: PyPdfToTextConfigOverrides | None = None,
+        remove_from_parent: bool = False,
     ) -> PdfExtract:
+        """
+        Include pages at the indices supplied in 'page_indices'.
+
+        Args:
+            page_indices (list[int]): The indices to include.
+            config_overrides (PyPdfToTextConfigOverrides | None): settings to override in the
+                child instance.
+            remove_from_parent (bool): If True, remove the selected pages from the parent
+                instance after creating the child. Defaults to False.
+
+        Returns:
+            PdfExtract: a child instance containing the pages specified.
+        """
+
+    @overload
+    def child(
+        self,
+        page_indices: tuple[int, int],
+        config_overrides: PyPdfToTextConfigOverrides | None = None,
+        remove_from_parent: bool = False,
+    ) -> PdfExtract:
+        """
+        Include pages between the supplied indices *inclusive*.
+
+        Args:
+            page_indices (tuple[int, int]): The start and end index of the pages to include.
+            config_overrides (PyPdfToTextConfigOverrides | None): settings to override in the
+                child instance.
+            remove_from_parent (bool): If True, remove the selected pages from the parent
+                instance after creating the child. Defaults to False.
+
+        Returns:
+            PdfExtract: a child instance containing the pages specified.
+        """
+
+    def child(
+        self,
+        page_indices: Callable[[ExtractedPage], bool] | list[int] | tuple[int, int],
+        config_overrides: PyPdfToTextConfigOverrides | None = None,
+        remove_from_parent: bool = False,
+    ) -> PdfExtract | None:
         """
         Creates a child PdfExtract instance for the selected pages preserving
         extracted text, image compressions, and page reorientations from the parent.
 
         Args:
-            page_indices (list[int] | tuple[int, int] | None): a list of 0-based page indices
-                OR a tuple of start page index, stop page index (inclusive) to include. If
-                None (default), all pages are included in the child.
+            page_indices (Callable | list | tuple): Pages to include.
             config_overrides (PyPdfToTextConfigOverrides | None): settings to override in the
                 child instance.
+            remove_from_parent (bool): If True, remove the selected pages from the parent
+                instance after creating the child. Defaults to False.
 
         Returns:
-            PdfExtract: a child instance containing the pages specified.
+            PdfExtract | None: a child instance containing the pages specified or
+                None if the supplied parameters do not identify any child pages.
         """
-        if isinstance(page_indices, tuple):
+        if page_indices is None:
+            # support legacy 'None' behavior.
+            logger.warning(
+                "page_indices=None is deprecated. Support will be removed in a future update."
+            )
+            page_indices = lambda _: True  # pylint:disable=unnecessary-lambda-assignment
+        if callable(page_indices):
+            page_indices = [i for i, pg in enumerate(self.extracted_pages) if page_indices(pg)]
+            if not page_indices:
+                return None
+        elif isinstance(page_indices, tuple):
             page_indices = list(range(page_indices[0], page_indices[1] + 1))
-        elif page_indices is None:
-            page_indices = list(range(len(self.reader.pages)))
-        return PdfExtract(
+        child_extract = PdfExtract(
             pdf=self.clip_pages(page_indices),
             config=PyPdfToTextConfig(base=self.config, overrides=config_overrides),
             init_extracted_pages=[
@@ -365,6 +508,9 @@ class PdfExtract:
             ],
             compressed=self.compressed,
         )
+        if remove_from_parent:
+            self.remove_pages(page_indices)
+        return child_extract
 
     def compress_images(
         self,
@@ -418,6 +564,43 @@ class PdfExtract:
                 img.replace(new_img, resolution=300)
         self._regenerate_body()
         self.compressed = True
+
+    def add_named_destinations(self, outline_info: list[tuple[str, int]]) -> None:
+        """Add outline bookmarks and named destinations to the PDF.
+
+        Each entry in outline_info produces both a visible bookmark (outline item)
+        and a named destination referenceable by name in the document catalog.
+        Duplicate names and out-of-range page indices are skipped with a warning.
+
+        Args:
+            outline_info: List of (name, page_index) tuples. page_index is 0-based.
+        """
+        if not outline_info:
+            return
+
+        total_pages = len(self.writer.pages)
+        seen_names: set[str] = set()
+
+        for name, page_idx in outline_info:
+            if page_idx < 0 or page_idx >= total_pages:
+                logger.warning(
+                    "Skipping destination '%s': page_idx=%d out of range [0, %d)",
+                    name,
+                    page_idx,
+                    total_pages,
+                )
+                continue
+            # dedup destinations with numeric idxs
+            dup_idx = 0
+            while name in seen_names:
+                dup_idx += 1
+                name = f"{name} {dup_idx}"
+            seen_names.add(name)
+
+            self.writer.add_outline_item(name, page_idx)
+            self.writer.add_named_destination(name, page_idx)
+
+        self._regenerate_body()
 
     def _regenerate_body(self):
         new_body_io = io.BytesIO()
@@ -481,13 +664,15 @@ class PdfExtract:
                 and "/SMask" in xobj[img]  # pyright: ignore
                 and "/Name" in xobj[img]["/SMask"]  # pyright: ignore
             )
-            logger.debug(
-                "page_group='%s' references refd_names=%s; clearing: %s",
-                page_group,
-                refd_names,
-                xobj.keys() - refd_names,
-            )
-            for unrefd_img in xobj.keys() - refd_names:
+            unrefd_imgs = xobj.keys() - refd_names
+            if unrefd_imgs:
+                logger.debug(
+                    "page_group='%s' references refd_names=%s; clearing: %s",
+                    page_group,
+                    refd_names,
+                    unrefd_imgs,
+                )
+            for unrefd_img in unrefd_imgs:
                 replaced_one = True
                 pdf_writer._replace_object(  # pylint:disable=protected-access
                     xobj[unrefd_img].indirect_reference, NullObject()  # pyright: ignore
