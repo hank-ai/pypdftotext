@@ -88,9 +88,56 @@ class TestPdfExtract(unittest.TestCase):
         self.assertEqual(len(child2.extracted_pages), 3)
 
         # Test with config overrides
-        child3 = pdf.child(page_indices=[0], config_overrides={"MIN_LINES_OCR_TRIGGER": 15})
+        child3 = pdf.child(
+            page_indices=[0],
+            config_overrides={"MIN_LINES_OCR_TRIGGER": 15},
+            remove_from_parent=True,
+        )
         self.assertEqual(child3.config.MIN_LINES_OCR_TRIGGER, 15)
         self.assertNotEqual(pdf.config.MIN_LINES_OCR_TRIGGER, 15)
+        self.assertEqual(len(pdf.extracted_pages), 4, "Removal unsuccessful.")
+
+    def test_functional_child_creation_w_removal(self):
+        """Test child PDF creation with various page selections."""
+        pdf = PdfExtract(self.deid_epic_pdf)
+
+        # Test with list of indices
+        child = pdf.child(
+            page_indices=lambda pg: pg.text.strip().startswith(
+                "Intraprocedure Flowsheet Data (continued)"
+            ),
+            remove_from_parent=True,
+        )
+        self.assertEqual(len(child.extracted_pages), 3)
+        self.assertEqual(len(pdf.extracted_pages), 2)
+
+    def test_functional_page_removal(self):
+        """Test child PDF creation with various page selections."""
+        pdf = PdfExtract(self.deid_epic_pdf)
+
+        # Test with functional remove
+        pdf.remove_pages(
+            remove=lambda pg: pg.text.strip().startswith(
+                "Intraprocedure Flowsheet Data (continued)"
+            )
+        )
+        self.assertEqual(len(pdf.extracted_pages), 2)
+
+    def test_tuple_page_removal(self):
+        """Test child PDF creation with various page selections."""
+        pdf = PdfExtract(self.deid_epic_pdf)
+
+        # Test with tuple remove
+        pdf.remove_pages(remove=(0, 2))
+        self.assertEqual(len(pdf.extracted_pages), 2)
+
+    def test_named_destinations(self):
+        """Test child PDF creation with various page selections."""
+        pdf = PdfExtract(self.deid_epic_pdf)
+        og_bytes = pdf.body
+        # Test with tuple remove
+        pdf.add_named_destinations([("test", 1), ("test", 2)])
+        self.assertNotEqual(og_bytes, pdf.body)
 
     def test_handwritten_ratio_without_ocr(self):
         """Test handwritten_ratio returns 0 for non-OCR'd pages."""

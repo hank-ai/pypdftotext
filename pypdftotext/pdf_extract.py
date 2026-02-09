@@ -590,9 +590,11 @@ class PdfExtract:
                     total_pages,
                 )
                 continue
-            if name in seen_names:
-                logger.warning("Skipping duplicate named destination '%s'", name)
-                continue
+            # dedup destinations with numeric idxs
+            dup_idx = 0
+            while name in seen_names:
+                dup_idx += 1
+                name = f"{name} {dup_idx}"
             seen_names.add(name)
 
             self.writer.add_outline_item(name, page_idx)
