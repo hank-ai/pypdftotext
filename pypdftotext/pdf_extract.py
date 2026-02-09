@@ -592,9 +592,10 @@ class PdfExtract:
                 continue
             # dedup destinations with numeric idxs
             dup_idx = 0
+            og_name = name
             while name in seen_names:
                 dup_idx += 1
-                name = f"{name} {dup_idx}"
+                name = f"{og_name} {dup_idx}"
             seen_names.add(name)
 
             self.writer.add_outline_item(name, page_idx)
