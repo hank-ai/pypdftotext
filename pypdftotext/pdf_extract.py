@@ -78,9 +78,7 @@ class PdfExtract:
         self.body: bytes
         self.debug_path: Path | None = kwargs.get("debug_path")
         self.compressed: bool = kwargs.get("compressed", False)
-        self._extracted_pages: list[ExtractedPage] | None = kwargs.get(
-            "init_extracted_pages"
-        )
+        self._extracted_pages: list[ExtractedPage] | None = kwargs.get("init_extracted_pages")
         self._azure: AzureDocIntelIntegrator | None = kwargs.get("azure")
         self._batch_mode: bool = kwargs.get("_batch_mode", False)
         self.ocr_page_idxs: list[int] = []
@@ -216,9 +214,7 @@ class PdfExtract:
         # this originally compared `len(txt.splitlines())` which was
         # VERY inefficient. The + 1 below preserves the original
         # behavior for the `min_lines_ocr_trigger` parameter
-        line_count_less_than_ocr_trigger = (
-            txt.count("\n") + 1 <= self.config.MIN_LINES_OCR_TRIGGER
-        )
+        line_count_less_than_ocr_trigger = txt.count("\n") + 1 <= self.config.MIN_LINES_OCR_TRIGGER
         # add as an OCR candidate if page has too few lines.
         if not self.config.DISABLE_OCR and line_count_less_than_ocr_trigger:
             return pg_idx
@@ -243,9 +239,7 @@ class PdfExtract:
             position=self.config.PROGRESS_BAR_POSITION,
             leave=None,
         )
-        pre_ocr = [
-            self._embedded_text(page, page_index) for page_index, page in self._pbar
-        ]
+        pre_ocr = [self._embedded_text(page, page_index) for page_index, page in self._pbar]
         self._extracted_pages = [
             ExtractedPage(pg, 0.0, txt if isinstance(txt, str) else "")
             for txt, pg in zip(pre_ocr, self.reader.pages)
@@ -253,9 +247,7 @@ class PdfExtract:
         self.ocr_page_idxs = [itm for itm in pre_ocr if isinstance(itm, int)]
         if self._azure:
             self._azure.config = self.config
-        azure = (
-            AzureDocIntelIntegrator(self.config) if self._azure is None else self._azure
-        )
+        azure = AzureDocIntelIntegrator(self.config) if self._azure is None else self._azure
 
         # Parallel Azure OCR API calls will be made later if in batch mode.
         if not self._batch_mode:
@@ -284,9 +276,7 @@ class PdfExtract:
         `self.config.TRIGGER_OCR_PAGE_RATIO`. Updates the proper self.extracted_pages
         entries with OCR'd text and handwritten ratios if OCR is triggered.
         """
-        rotated_pages = (
-            False  # track whether we rotated any pages and regenerate self.body if so.
-        )
+        rotated_pages = False  # track whether we rotated any pages and regenerate self.body if so.
         # do not OCR unless the number of pages requiring OCR / total pages exceeds a target ratio.
         # Skip OCR if in batch mode (will be handled by batch processor)
         if (
@@ -299,9 +289,7 @@ class PdfExtract:
             else:
                 replacements = [
                     (old_bytes.decode(), new_bytes.decode())
-                    for old_bytes, new_bytes in (
-                        self.config.REPLACE_BYTE_CODES or {}
-                    ).items()
+                    for old_bytes, new_bytes in (self.config.REPLACE_BYTE_CODES or {}).items()
                 ]
 
             ocr_pages = azure.ocr_pages(self.body, self.ocr_page_idxs)
@@ -345,9 +333,7 @@ class PdfExtract:
                 ext_pg.azure_page = azure.page_at_index(og_pg_idx)
 
         if rotated_pages:
-            logger.debug(
-                "Regenerating PdfExtract body with corrected page orientations."
-            )
+            logger.debug("Regenerating PdfExtract body with corrected page orientations.")
             self._regenerate_body()
 
     @overload
@@ -385,9 +371,7 @@ class PdfExtract:
             remove (tuple[int, int]): The start and end index of the pages to remove.
         """
 
-    def remove_pages(
-        self, remove: Callable[[ExtractedPage], bool] | list[int] | tuple[int, int]
-    ):
+    def remove_pages(self, remove: Callable[[ExtractedPage], bool] | list[int] | tuple[int, int]):
         """
         Run 'remove' on all extracted pages and remove all pages for which
         the test returns True.
@@ -399,9 +383,7 @@ class PdfExtract:
         """
         starting_len = len(self.extracted_pages)
         if callable(remove):
-            self._extracted_pages = [
-                page for page in self.extracted_pages if not remove(page)
-            ]
+            self._extracted_pages = [page for page in self.extracted_pages if not remove(page)]
         elif isinstance(remove, list):
             self._extracted_pages = [
                 page for i, page in enumerate(self.extracted_pages) if i not in remove
@@ -511,13 +493,9 @@ class PdfExtract:
             logger.warning(
                 "page_indices=None is deprecated. Support will be removed in a future update."
             )
-            page_indices = (
-                lambda _: True
-            )  # pylint:disable=unnecessary-lambda-assignment
+            page_indices = lambda _: True  # pylint:disable=unnecessary-lambda-assignment
         if callable(page_indices):
-            page_indices = [
-                i for i, pg in enumerate(self.extracted_pages) if page_indices(pg)
-            ]
+            page_indices = [i for i, pg in enumerate(self.extracted_pages) if page_indices(pg)]
             if not page_indices:
                 return None
         elif isinstance(page_indices, tuple):
@@ -581,12 +559,8 @@ class PdfExtract:
                     and abs(page_aspect - img_aspect) < aspect_tolerance
                 ):
                     factor = (max_overscale * page.mediabox.width) / new_img.width
-                    logger.debug(
-                        "Scaling pg idx %s img idx %s with factor=%.2f", ip, ii, factor
-                    )
-                    new_img = ImageOps.scale(
-                        new_img, factor, resample=Image.Resampling.LANCZOS
-                    )
+                    logger.debug("Scaling pg idx %s img idx %s with factor=%.2f", ip, ii, factor)
+                    new_img = ImageOps.scale(new_img, factor, resample=Image.Resampling.LANCZOS)
                 img.replace(new_img, resolution=300)
         self._regenerate_body()
         self.compressed = True
@@ -669,22 +643,16 @@ class PdfExtract:
                     xobjs.append(xobj)
                     xobj_pages.append([i])
 
-        replaced_one = (
-            False  # don't waste time rerunning write operation if no xobjs are cleared
-        )
+        replaced_one = False  # don't waste time rerunning write operation if no xobjs are cleared
 
         for page_group, xobj in zip(xobj_pages, xobjs):
             # find the names of XObjects that are actually referenced by a page in the output.
-            name_regex = re.compile(
-                r"(" + r"|".join(xobj.keys()) + r")\s", re.MULTILINE
-            )
+            name_regex = re.compile(r"(" + r"|".join(xobj.keys()) + r")\s", re.MULTILINE)
             refd_names = set(
                 _m
                 for i in page_group
                 if (_contents := pdf_writer.pages[i].get_contents()) is not None
-                for _m in name_regex.findall(
-                    str(_contents.get_data(), "utf-8", "ignore")
-                )
+                for _m in name_regex.findall(str(_contents.get_data(), "utf-8", "ignore"))
             )
             # add the names of any XObjects referenced by the XObjects captured via regex.
             refd_names.update(
