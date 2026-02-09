@@ -111,6 +111,19 @@ class TestPdfExtract(unittest.TestCase):
         self.assertEqual(len(child.extracted_pages), 3)
         self.assertEqual(len(pdf.extracted_pages), 2)
 
+    def test_landscape_property(self):
+        """Test child PDF creation with various page selections."""
+        pdf = PdfExtract(
+            self.all70th_pdf,
+            PyPdfToTextConfig(overrides={"DISABLE_OCR": True}),
+        )
+
+        # Test with list of indices
+        self.assertFalse(pdf.extracted_pages[0].landscape)
+        self.assertTrue(pdf.extracted_pages[1].landscape)
+        self.assertFalse(pdf.extracted_pages[2].landscape)
+        self.assertTrue(pdf.extracted_pages[3].landscape)
+
     def test_functional_page_removal(self):
         """Test child PDF creation with various page selections."""
         pdf = PdfExtract(self.deid_epic_pdf)

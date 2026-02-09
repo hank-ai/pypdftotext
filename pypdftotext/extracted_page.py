@@ -54,4 +54,7 @@ class ExtractedPage:
     def landscape(self) -> bool:
         """Is the page in landscape orientation? True or False."""
         mb = RectangleObject(self.page_obj.mediabox)
-        return mb.height < mb.width
+        if mb.height < mb.width:
+            return self.page_obj.rotation % 180 == 0
+        else:
+            return self.page_obj.rotation % 180 != 0
