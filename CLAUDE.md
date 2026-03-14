@@ -40,53 +40,11 @@ python -m build
 pip install -e .
 
 # Install with optional dependencies
-pip install -e ".[dev]"  # Development dependencies including type stubs
 pip install -e ".[s3]"   # S3 support for reading PDFs from AWS
 pip install -e ".[image]" # Image processing capabilities
 pip install -e ".[full]"  # All optional dependencies
+pip install -e ".[dev]"  # All of the above + pytest, pytest-cov, and type stubs
 ```
-
-### Testing
-
-The project uses **pytest** as the testing framework with the following configuration:
-
-```bash
-# Install test dependencies
-pip install -e ".[dev]"   # Development dependencies including tests and type stubs
-
-# Run all tests
-pytest
-
-# Run tests with coverage
-pytest --cov=pypdftotext
-
-# Run specific test file
-pytest tests/test_config.py
-
-# Run tests by marker
-pytest -m unit          # Run unit tests only
-pytest -m integration   # Run integration tests only
-pytest -m "not slow"    # Skip slow tests
-
-# Run tests with verbose output
-pytest -v
-
-# Run specific test function
-pytest tests/test_config.py::TestPyPdfToTextConfig::test_base_inheritance
-```
-
-**Test Structure:**
-
-- Tests are located in the `tests/` directory
-- Test files follow the pattern `test_*.py`
-- Test classes start with `Test`
-- Test functions start with `test_`
-
-**pytest Configuration (in `pyproject.toml`):**
-
-- Coverage reports generated for `pypdftotext` package
-- HTML coverage report available in `htmlcov/`
-- Markers available: `unit`, `integration`, `slow`
 
 ## Architecture
 
