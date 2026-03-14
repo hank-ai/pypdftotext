@@ -10,15 +10,14 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, overload
 
-from pypdf import PdfReader, PdfWriter, PageObject
+from pypdf import PageObject, PdfReader, PdfWriter
 from pypdf.generic import DictionaryObject, NullObject
 from tqdm import tqdm
 
 from ._config import PyPdfToTextConfig, PyPdfToTextConfigOverrides
 from .azure_docintel_integrator import AzureDocIntelIntegrator
-from .header_footer_detection import assign_headers_and_footers
 from .extracted_page import ExtractedPage
-
+from .header_footer_detection import assign_headers_and_footers
 
 try:
     import boto3
@@ -38,6 +37,18 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
+
+
+class AllPagesRemovedError(ValueError):
+    """Raised when an operation would remove all pages from a PdfExtract instance.
+
+    Catch this to handle the case where, for example, a filter passed to
+    ``remove_pages()`` matches every page, or ``child(remove_from_parent=True)``
+    selects all pages leaving the parent empty.
+
+    Pass ``raise_on_empty=False`` to ``remove_pages()`` or ``child()`` to
+    suppress this error and perform a silent no-op instead.
+    """
 
 
 class PdfExtract:
@@ -116,7 +127,7 @@ class PdfExtract:
         A list of ExtractedPage objects containing text and metadata
         for each page in the source PDF.
         """
-        if not self._extracted_pages:
+        if self._extracted_pages is None:
             self._extracted_pages = self._extract_pages()
         return self._extracted_pages
 
@@ -173,7 +184,7 @@ class PdfExtract:
         if not hasattr(self, "_s3"):
             # lazy load this one...
             logger.debug("Initializing boto3 s3 client for PdfExtract")
-            self._s3 = boto3.client(  # pylint: disable=attribute-defined-outside-init
+            self._s3 = boto3.client(
                 service_name="s3",
                 aws_access_key_id=self.config.AWS_ACCESS_KEY_ID,
                 aws_secret_access_key=self.config.AWS_SECRET_ACCESS_KEY,
@@ -337,7 +348,7 @@ class PdfExtract:
             self._regenerate_body()
 
     @overload
-    def remove_pages(self, remove: Callable[[ExtractedPage], bool]):
+    def remove_pages(self, remove: Callable[[ExtractedPage], bool], raise_on_empty: bool = True):
         """
         Run the 'remove' test function on all extracted pages and remove
         all pages for which the test returns *True*.
@@ -347,10 +358,13 @@ class PdfExtract:
         Args:
             remove (Callable[[ExtractedPage], bool]): Runs on every page. Pages
                 returning True are removed.
+            raise_on_empty (bool): If True (default), raises AllPagesRemovedError
+                when all pages would be removed. If False, performs a no-op instead
+                and logs a warning.
         """
 
     @overload
-    def remove_pages(self, remove: list[int]):
+    def remove_pages(self, remove: list[int], raise_on_empty: bool = True):
         """
         Remove pages at the indices supplied in 'remove'.
 
@@ -358,10 +372,13 @@ class PdfExtract:
 
         Args:
             remove (list[int]): The indices to remove.
+            raise_on_empty (bool): If True (default), raises AllPagesRemovedError
+                when all pages would be removed. If False, performs a no-op instead
+                and logs a warning.
         """
 
     @overload
-    def remove_pages(self, remove: tuple[int, int]):
+    def remove_pages(self, remove: tuple[int, int], raise_on_empty: bool = True):
         """
         Remove pages between the supplied indices *inclusive*.
 
@@ -369,9 +386,16 @@ class PdfExtract:
 
         Args:
             remove (tuple[int, int]): The start and end index of the pages to remove.
+            raise_on_empty (bool): If True (default), raises AllPagesRemovedError
+                when all pages would be removed. If False, performs a no-op instead
+                and logs a warning.
         """
 
-    def remove_pages(self, remove: Callable[[ExtractedPage], bool] | list[int] | tuple[int, int]):
+    def remove_pages(
+        self,
+        remove: Callable[[ExtractedPage], bool] | list[int] | tuple[int, int],
+        raise_on_empty: bool = True,
+    ):
         """
         Run 'remove' on all extracted pages and remove all pages for which
         the test returns True.
@@ -380,8 +404,15 @@ class PdfExtract:
 
         Args:
             remove (Callable | list | tuple): Pages to remove.
+            raise_on_empty (bool): If True (default), raises AllPagesRemovedError
+                when all pages would be removed, leaving the instance unchanged.
+                If False, performs a no-op and logs a warning instead.
+
+        Raises:
+            AllPagesRemovedError: If all pages would be removed and raise_on_empty
+                is True.
         """
-        starting_len = len(self.extracted_pages)
+        starting_pages = list(self.extracted_pages)
         if callable(remove):
             self._extracted_pages = [page for page in self.extracted_pages if not remove(page)]
         elif isinstance(remove, list):
@@ -398,7 +429,19 @@ class PdfExtract:
             if isinstance(remove, tuple):
                 raise ValueError(f"Improper tuple input {remove=}. Expected length 2.")
             raise TypeError(f"Invalid {type(remove)=}")
-        if len(self.extracted_pages) < starting_len:
+        if not self._extracted_pages and starting_pages:
+            self._extracted_pages = starting_pages
+            if raise_on_empty:
+                raise AllPagesRemovedError(
+                    "All pages would be removed. Pass raise_on_empty=False to "
+                    "suppress this error and perform a no-op instead."
+                )
+            logger.warning(
+                "remove_pages() would remove all pages — no-op performed. "
+                "Pass raise_on_empty=True (default) to raise AllPagesRemovedError instead."
+            )
+            return
+        if len(self._extracted_pages) < len(starting_pages):
             self._regenerate_body()
 
     @overload
@@ -407,6 +450,7 @@ class PdfExtract:
         page_indices: Callable[[ExtractedPage], bool],
         config_overrides: PyPdfToTextConfigOverrides | None = None,
         remove_from_parent: bool = False,
+        raise_on_empty: bool = True,
     ) -> PdfExtract | None:
         """
         Run the 'page_indices' test function on all extracted pages and include
@@ -419,6 +463,9 @@ class PdfExtract:
                 child instance.
             remove_from_parent (bool): If True, remove the selected pages from the parent
                 instance after creating the child. Defaults to False.
+            raise_on_empty (bool): When remove_from_parent=True, controls behavior if
+                all parent pages are selected. If True (default), raises
+                AllPagesRemovedError. If False, performs a no-op on the parent instead.
 
         Returns:
             PdfExtract | None: a child instance containing the pages specified or
@@ -431,6 +478,7 @@ class PdfExtract:
         page_indices: list[int],
         config_overrides: PyPdfToTextConfigOverrides | None = None,
         remove_from_parent: bool = False,
+        raise_on_empty: bool = True,
     ) -> PdfExtract:
         """
         Include pages at the indices supplied in 'page_indices'.
@@ -441,6 +489,9 @@ class PdfExtract:
                 child instance.
             remove_from_parent (bool): If True, remove the selected pages from the parent
                 instance after creating the child. Defaults to False.
+            raise_on_empty (bool): When remove_from_parent=True, controls behavior if
+                all parent pages are selected. If True (default), raises
+                AllPagesRemovedError. If False, performs a no-op on the parent instead.
 
         Returns:
             PdfExtract: a child instance containing the pages specified.
@@ -452,6 +503,7 @@ class PdfExtract:
         page_indices: tuple[int, int],
         config_overrides: PyPdfToTextConfigOverrides | None = None,
         remove_from_parent: bool = False,
+        raise_on_empty: bool = True,
     ) -> PdfExtract:
         """
         Include pages between the supplied indices *inclusive*.
@@ -462,6 +514,9 @@ class PdfExtract:
                 child instance.
             remove_from_parent (bool): If True, remove the selected pages from the parent
                 instance after creating the child. Defaults to False.
+            raise_on_empty (bool): When remove_from_parent=True, controls behavior if
+                all parent pages are selected. If True (default), raises
+                AllPagesRemovedError. If False, performs a no-op on the parent instead.
 
         Returns:
             PdfExtract: a child instance containing the pages specified.
@@ -472,6 +527,7 @@ class PdfExtract:
         page_indices: Callable[[ExtractedPage], bool] | list[int] | tuple[int, int],
         config_overrides: PyPdfToTextConfigOverrides | None = None,
         remove_from_parent: bool = False,
+        raise_on_empty: bool = True,
     ) -> PdfExtract | None:
         """
         Creates a child PdfExtract instance for the selected pages preserving
@@ -483,17 +539,25 @@ class PdfExtract:
                 child instance.
             remove_from_parent (bool): If True, remove the selected pages from the parent
                 instance after creating the child. Defaults to False.
+            raise_on_empty (bool): When remove_from_parent=True, controls behavior if
+                all parent pages are selected. If True (default), raises
+                AllPagesRemovedError and leaves the parent unchanged. If False,
+                performs a no-op on the parent and logs a warning instead.
 
         Returns:
             PdfExtract | None: a child instance containing the pages specified or
                 None if the supplied parameters do not identify any child pages.
+
+        Raises:
+            AllPagesRemovedError: If remove_from_parent=True, all pages are selected,
+                and raise_on_empty=True.
         """
         if page_indices is None:
             # support legacy 'None' behavior.
             logger.warning(
                 "page_indices=None is deprecated. Support will be removed in a future update."
             )
-            page_indices = lambda _: True  # pylint:disable=unnecessary-lambda-assignment
+            page_indices = list(range(len(self.extracted_pages)))
         if callable(page_indices):
             page_indices = [i for i, pg in enumerate(self.extracted_pages) if page_indices(pg)]
             if not page_indices:
@@ -509,7 +573,7 @@ class PdfExtract:
             compressed=self.compressed,
         )
         if remove_from_parent:
-            self.remove_pages(page_indices)
+            self.remove_pages(page_indices, raise_on_empty=raise_on_empty)
         return child_extract
 
     def compress_images(
@@ -604,6 +668,7 @@ class PdfExtract:
         self._regenerate_body()
 
     def _regenerate_body(self):
+        """Regenerate ``self.body`` following a transformation."""
         new_body_io = io.BytesIO()
         self.writer.write(new_body_io)
         self.body = new_body_io.getvalue()
@@ -675,8 +740,9 @@ class PdfExtract:
                 )
             for unrefd_img in unrefd_imgs:
                 replaced_one = True
-                pdf_writer._replace_object(  # pylint:disable=protected-access
-                    xobj[unrefd_img].indirect_reference, NullObject()  # pyright: ignore
+                pdf_writer._replace_object(
+                    xobj[unrefd_img].indirect_reference,  # pyright: ignore[reportArgumentType]
+                    NullObject(),
                 )
 
         # if we nulled out any xobjs, regenerate output bytes.
