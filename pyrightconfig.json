@@ -1,0 +1,8 @@
+{
+  "include": ["app"],
+  "ignore": ["**/scripts/*", "**/tests/*"],
+  "pythonVersion": "3.10",
+  "typeCheckingMode": "standard",
+  "reportTypedDictNotRequiredAccess": false,
+  "reportPossiblyUnboundVariable": false
+}

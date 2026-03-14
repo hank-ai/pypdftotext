@@ -10,7 +10,7 @@ from azure.ai.documentintelligence.models import (
     DocumentSelectionMark,
 )
 
-from ._config import constants, PyPdfToTextConfig
+from ._config import PyPdfToTextConfig, constants
 
 logger = logging.getLogger(__name__)
 

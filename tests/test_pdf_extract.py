@@ -8,6 +8,7 @@ from unittest.mock import patch, MagicMock
 
 from pypdftotext import PdfExtract, constants
 from pypdftotext._config import PyPdfToTextConfig
+from pypdftotext.pdf_extract import AllPagesRemovedError
 
 
 class TestPdfExtract(unittest.TestCase):
@@ -555,6 +556,87 @@ class TestPdfExtract(unittest.TestCase):
         # Size might be slightly smaller due to different white_point
         # But should still be compressed
         self.assertLessEqual(recompressed_size, compressed_size)
+
+    def test_remove_pages_raises_by_default_when_all_removed(self):
+        """remove_pages() raises AllPagesRemovedError when all pages are removed."""
+        pdf = PdfExtract(self.deid_epic_pdf)
+        original_pages = list(pdf.extracted_pages)
+        original_body = pdf.body
+
+        with self.assertRaises(AllPagesRemovedError):
+            pdf.remove_pages(remove=lambda _: True)
+
+        # Pages and body must be unchanged after the exception
+        self.assertEqual(pdf.extracted_pages, original_pages)
+        self.assertEqual(pdf.body, original_body)
+
+    def test_remove_pages_noop_with_raise_on_empty_false(self):
+        """remove_pages(raise_on_empty=False) is a no-op when all pages would be removed."""
+        pdf = PdfExtract(self.deid_epic_pdf)
+        original_pages = list(pdf.extracted_pages)
+        original_body = pdf.body
+
+        pdf.remove_pages(remove=lambda _: True, raise_on_empty=False)
+
+        self.assertEqual(pdf.extracted_pages, original_pages)
+        self.assertEqual(pdf.body, original_body)
+
+    def test_remove_pages_list_raises_when_all_removed(self):
+        """remove_pages() raises AllPagesRemovedError when all pages removed via list."""
+        pdf = PdfExtract(self.deid_epic_pdf)
+        all_indices = list(range(len(pdf.extracted_pages)))
+
+        with self.assertRaises(AllPagesRemovedError):
+            pdf.remove_pages(remove=all_indices)
+
+    def test_remove_pages_tuple_raises_when_all_removed(self):
+        """remove_pages() raises AllPagesRemovedError when all pages removed via tuple."""
+        pdf = PdfExtract(self.deid_epic_pdf)
+        last = len(pdf.extracted_pages) - 1
+
+        with self.assertRaises(AllPagesRemovedError):
+            pdf.remove_pages(remove=(0, last))
+
+    def test_child_remove_from_parent_raises_when_all_removed(self):
+        """child(remove_from_parent=True) raises AllPagesRemovedError when parent is emptied."""
+        pdf = PdfExtract(self.deid_epic_pdf)
+        original_page_count = len(pdf.extracted_pages)
+        all_indices = list(range(original_page_count))
+
+        with self.assertRaises(AllPagesRemovedError):
+            pdf.child(page_indices=all_indices, remove_from_parent=True)
+
+        # Parent pages must be unchanged
+        self.assertEqual(len(pdf.extracted_pages), original_page_count)
+
+    def test_child_remove_from_parent_noop_with_raise_on_empty_false(self):
+        """child(remove_from_parent=True, raise_on_empty=False) leaves parent intact."""
+        pdf = PdfExtract(self.deid_epic_pdf)
+        original_page_count = len(pdf.extracted_pages)
+        all_indices = list(range(original_page_count))
+
+        child = pdf.child(page_indices=all_indices, remove_from_parent=True, raise_on_empty=False)
+
+        # Child was created successfully
+        self.assertEqual(len(child.extracted_pages), original_page_count)
+        # Parent is unchanged (noop)
+        self.assertEqual(len(pdf.extracted_pages), original_page_count)
+
+    def test_all_pages_removed_error_importable_from_package(self):
+        """AllPagesRemovedError is exported from the pypdftotext package."""
+        import pypdftotext
+
+        self.assertTrue(hasattr(pypdftotext, "AllPagesRemovedError"))
+        self.assertTrue(issubclass(pypdftotext.AllPagesRemovedError, ValueError))
+
+    def test_partial_removal_still_works_normally(self):
+        """Partial page removal is unaffected by the new raise_on_empty param."""
+        pdf = PdfExtract(self.deid_epic_pdf)
+        original_count = len(pdf.extracted_pages)
+
+        pdf.remove_pages(remove=[0])  # remove just one page
+
+        self.assertEqual(len(pdf.extracted_pages), original_count - 1)
 
 
 if __name__ == "__main__":

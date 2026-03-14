@@ -4,9 +4,8 @@ from __future__ import annotations
 
 import logging
 import os
-from dataclasses import dataclass, InitVar, field
-from typing import cast, Any, Literal, TypedDict
-
+from dataclasses import InitVar, dataclass, field
+from typing import Any, Literal, TypedDict, cast
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +55,6 @@ class _ConfigMixIn:
     Package wide constants for pypdftotext.
     """
 
-    # pylint: disable=invalid-name
     _setattrs_: set[str] = field(default_factory=set, init=False)
     _initialized_: bool = field(default=False, init=False)
     INHERIT_CONSTANTS: bool = True
@@ -305,7 +303,7 @@ class PyPdfToTextConfig(_ConfigMixIn):
             if base is constants and (overrides or {}).get("INHERIT_CONSTANTS") is False:
                 pass  # if overrides disables constant inheritance, don't inherit
             else:
-                for field_name in base._setattrs_:  # pylint: disable=protected-access
+                for field_name in base._setattrs_:
                     setattr(self, field_name, getattr(base, field_name))
         for field_name, val in (overrides or {}).items():
             if hasattr(self, field_name):

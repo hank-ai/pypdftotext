@@ -1,6 +1,7 @@
 """Define the ExtractedPage dataclass used by PdfExtract"""
 
 from dataclasses import dataclass
+from functools import cached_property
 from typing import Literal
 
 from azure.ai.documentintelligence.models import DocumentPage
@@ -34,8 +35,6 @@ class ExtractedPage:
             PdfExtract().assign_document_indices() will dynamically set this value.
         header: Text detected as a header on this page.
         footer: Text detected as a footer on this page.
-        fingerprint: A PageFingerprint used for discovering page groupings that
-            share a common ancestor PDF.
     """
 
     page_obj: PageObject
@@ -47,8 +46,12 @@ class ExtractedPage:
     header: str = ""
     footer: str = ""
 
-    def __post_init__(self):
-        self.fingerprint = PageFingerprint.from_page(self.page_obj)
+    @cached_property
+    def fingerprint(self):
+        """
+        A PageFingerprint used for discovering page groupings that share a common ancestor PDF
+        """
+        return PageFingerprint(self.page_obj)
 
     @property
     def landscape(self) -> bool:
