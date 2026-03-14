@@ -5,14 +5,13 @@ import logging
 import os
 from dataclasses import dataclass, field
 
-from azure.ai.documentintelligence import DocumentIntelligenceClient, AnalyzeDocumentLROPoller
+from azure.ai.documentintelligence import AnalyzeDocumentLROPoller, DocumentIntelligenceClient
 from azure.ai.documentintelligence.models import AnalyzeResult, DocumentPage
 from azure.core.credentials import AzureKeyCredential
 from tqdm import tqdm
 
 from . import layout
 from ._config import PyPdfToTextConfig
-
 
 logger = logging.getLogger(__name__)
 

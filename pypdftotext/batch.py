@@ -5,7 +5,7 @@ from __future__ import annotations
 import io
 import logging
 from collections.abc import Mapping, Sequence
-from concurrent.futures import ThreadPoolExecutor, as_completed, Future
+from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from azure.core.exceptions import AzureError
@@ -16,7 +16,6 @@ from ._config import PyPdfToTextConfig
 from .azure_docintel_integrator import AzureDocIntelIntegrator
 from .header_footer_detection import assign_headers_and_footers
 from .pdf_extract import PdfExtract
-
 
 logger = logging.getLogger(__name__)
 
@@ -84,7 +83,6 @@ class PdfExtractBatch:
         with ThreadPoolExecutor(
             max_workers=min(len(s3_uris), self.config.MAX_WORKERS)
         ) as executor:
-
             futures: list[Future[tuple[str, PdfExtract | Exception]]] = []
             for pdf_name, s3_uri in s3_uris.items():
                 futures.append(executor.submit(self._extract_from_s3_uri, (pdf_name, s3_uri)))
@@ -117,7 +115,7 @@ class PdfExtractBatch:
                 pdf=s3_uri, config=self.config, **{**self.kwargs, "_batch_mode": True}
             )
             return pdf_name, extract
-        except Exception as e:  # pylint: disable=broad-exception-caught
+        except Exception as e:  # noqa: BLE001  # batch must survive per-item S3 failures; caller expects Exception in result
             logger.error(
                 "S3 Download Error: %r failed, %s",
                 pdf_name,
@@ -134,7 +132,7 @@ class PdfExtractBatch:
         try:
             # Step 2: Perform batch OCR if needed
             self._perform_batch_ocr()
-        except Exception as e:  # pylint: disable=broad-exception-caught
+        except Exception as e:  # noqa: BLE001  # batch must survive OCR failures to return partial results
             logger.error(
                 "PdfExtractBatch OCR Error: %e",
                 e,
@@ -188,7 +186,6 @@ class PdfExtractBatch:
         with ThreadPoolExecutor(
             max_workers=min(len(ocr_pdfs), self.config.MAX_WORKERS)
         ) as executor:
-
             futures: list[Future[tuple[str, PdfExtract]]] = []
             for pdf_name, pdf_ext in ocr_pdfs.items():
                 futures.append(executor.submit(self._ocr_single_pdf, (pdf_name, pdf_ext)))
@@ -226,7 +223,7 @@ class PdfExtractBatch:
                 azure_error,
                 exc_info=logger.getEffectiveLevel() == logging.DEBUG,
             )
-        except Exception as e:  # pylint: disable=broad-exception-caught
+        except Exception as e:  # noqa: BLE001  # batch must survive per-PDF OCR failures; AzureError caught above
             logger.error(
                 "PdfExtractBatch Error for %s: %s",
                 pdf_name,

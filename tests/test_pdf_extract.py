@@ -557,7 +557,6 @@ class TestPdfExtract(unittest.TestCase):
         # But should still be compressed
         self.assertLessEqual(recompressed_size, compressed_size)
 
-
     def test_remove_pages_raises_by_default_when_all_removed(self):
         """remove_pages() raises AllPagesRemovedError when all pages are removed."""
         pdf = PdfExtract(self.deid_epic_pdf)
@@ -626,6 +625,7 @@ class TestPdfExtract(unittest.TestCase):
     def test_all_pages_removed_error_importable_from_package(self):
         """AllPagesRemovedError is exported from the pypdftotext package."""
         import pypdftotext
+
         self.assertTrue(hasattr(pypdftotext, "AllPagesRemovedError"))
         self.assertTrue(issubclass(pypdftotext.AllPagesRemovedError, ValueError))
 

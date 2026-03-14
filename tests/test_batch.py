@@ -120,8 +120,8 @@ class TestPdfExtractBatch(unittest.TestCase):
         for page in result["test"].extracted_pages:
             self.assertEqual(page.source, "embedded")
 
-    @patch.object(AzureDocIntelIntegrator, 'ocr_pages')
-    @patch.object(AzureDocIntelIntegrator, 'create_client')
+    @patch.object(AzureDocIntelIntegrator, "ocr_pages")
+    @patch.object(AzureDocIntelIntegrator, "create_client")
     def test_extract_all_with_mock_azure(self, mock_create_client, mock_ocr_pages):
         """Test extraction with mocked Azure OCR using real sample data."""
         if not self.all70th_pdf_bytes or not self.all70th_expected_text:
@@ -165,8 +165,8 @@ class TestPdfExtractBatch(unittest.TestCase):
             self.skipTest("Sample data not available")
 
         # Mock the Azure OCR to return quickly
-        with patch.object(AzureDocIntelIntegrator, 'ocr_pages') as mock_ocr:
-            with patch.object(AzureDocIntelIntegrator, 'create_client') as mock_create:
+        with patch.object(AzureDocIntelIntegrator, "ocr_pages") as mock_ocr:
+            with patch.object(AzureDocIntelIntegrator, "create_client") as mock_create:
                 mock_create.return_value = True
                 mock_ocr.return_value = ["Page 1 text", "Page 2 text"]
 
@@ -195,8 +195,8 @@ class TestPdfExtractBatch(unittest.TestCase):
                 self.assertIn("pdf1", result)
                 self.assertIn("pdf2", result)
 
-    @patch.object(AzureDocIntelIntegrator, 'ocr_pages')
-    @patch.object(AzureDocIntelIntegrator, 'create_client')
+    @patch.object(AzureDocIntelIntegrator, "ocr_pages")
+    @patch.object(AzureDocIntelIntegrator, "create_client")
     def test_ocr_error_handling(self, mock_create_client, mock_ocr_pages):
         """Test that OCR errors are handled gracefully."""
         if not self.deid_epic_pdf_bytes:
