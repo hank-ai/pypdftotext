@@ -5,14 +5,33 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Project Overview
 
 pypdftotext is a Python package that provides OCR-enabled structured text extraction for PDF files. It's an extension for pypdf that:
+
 - Extracts text from PDFs using pypdf's "layout mode"
 - Falls back to Azure Document Intelligence OCR when no text is found
 - Handles various PDF complexities like custom glyphs and page corruptions
 - Supports batch OCR processing for efficiency
 
+## Python Environment
+
+Claude Code's Bash tool starts a fresh shell for every command. Python environments must be activated inline.
+
+### Activation Protocol
+
+1. **Check auto memory** (`MEMORY.md`) for a stored `PYTHON_CMD_PREFIX`. If present, prefix all `python`, `pip`, `pytest`, `ruff`, and `pyright` commands with it (e.g., `<PREFIX> python -m pytest tests/ -v`, `<PREFIX> pip install -e .`).
+2. **If no prefix is stored** (new contributor), detect the environment:
+   - **Linux/Mac**: Check for `.venv/` in the project root → prefix: `source .venv/bin/activate &&`
+   - **Windows (conda)**: Source conda's bash integration, then activate the env → prefix: `source /c/<user>/anaconda3/etc/profile.d/conda.sh && conda activate <env> &&`
+3. **Verify** by running: `<PREFIX> python -c "import pypdftotext; print('OK')"`
+4. **If verification fails**, ask the user:
+   - What Python environment manager do you use? (conda / venv / system)
+   - What is the environment name or path?
+   - What is the activation command for your shell?
+   Then persist the answers to auto memory (`MEMORY.md`) as `PYTHON_CMD_PREFIX`.
+
 ## Development Commands
 
 ### Build and Package
+
 ```bash
 # Build the package using flit
 python -m build
@@ -33,8 +52,7 @@ The project uses **pytest** as the testing framework with the following configur
 
 ```bash
 # Install test dependencies
-pip install -e ".[test]"  # Just testing tools
-pip install -e ".[dev]"   # All development dependencies including tests
+pip install -e ".[dev]"   # Development dependencies including tests and type stubs
 
 # Run all tests
 pytest
@@ -58,42 +76,17 @@ pytest tests/test_config.py::TestPyPdfToTextConfig::test_base_inheritance
 ```
 
 **Test Structure:**
+
 - Tests are located in the `tests/` directory
 - Test files follow the pattern `test_*.py`
 - Test classes start with `Test`
 - Test functions start with `test_`
 
 **pytest Configuration (in `pyproject.toml`):**
+
 - Coverage reports generated for `pypdftotext` package
 - HTML coverage report available in `htmlcov/`
 - Markers available: `unit`, `integration`, `slow`
-
-### Linting and Type Checking
-
-The project uses the following tools via VS Code extensions (configured in `.devcontainer/devcontainer.json`):
-
-- **Black**: Code formatter that runs automatically on save
-  - Configured as the default formatter
-  - Ensures consistent code style across the project
-
-- **Pylint**: Linter that runs automatically on save
-  - Configuration: `--load-plugins=pylint_pydantic --disable=W0311,R0903,C0301,C0302,W1203`
-  - Disabled rules:
-    - W0311: Bad indentation (handled by Black)
-    - R0903: Too few public methods
-    - C0301: Line too long
-    - C0302: Too many lines in module
-    - W1203: Use % formatting in logging functions
-
-- **Pyright/Pylance**: Type checker that runs in real-time
-  - Mode: `standard` type checking
-  - Provides immediate feedback on type issues as you code
-  - Note: boto3-stubs[s3] included in dev dependencies for S3 type hints
-
-When writing code, ensure it passes all three tools:
-1. Black formatting (automatic on save)
-2. Pylint checks (automatic on save)
-3. Pyright type checking (real-time feedback)
 
 ## Architecture
 
@@ -102,7 +95,7 @@ When writing code, ensure it passes all three tools:
 1. **Main API** (`pypdftotext/__init__.py`):
    - `pdf_text_pages()`: Primary function that extracts text from PDF pages
    - `pdf_text_page_lines()`: Returns text as list of lines per page
-   - `handwritten_ratio()`: Calculates ratio of handwritten to total characters on OCR'd pages
+   - Re-exports `PdfExtract`, `PdfExtractBatch`, `ExtractedPage`, `AllPagesRemovedError` for convenience
    - Handles PDF reading from bytes, BytesIO, or PdfReader objects
    - Implements intelligent OCR triggering based on extracted text quality
 
@@ -115,24 +108,35 @@ When writing code, ensure it passes all three tools:
 
 3. **PDF Extraction Engine** (`pdf_extract.py`):
    - `PdfExtract` class orchestrates the entire extraction workflow
-   - `ExtractedPage` dataclass tracks page metadata and source (embedded/OCR)
-   - Manages page-by-page extraction with progress tracking
-   - Handles S3 PDF retrieval when boto3 is available
+   - Accepts `str | Path | bytes | io.BytesIO | PdfReader`; a `str` may be an `s3://` URI
+   - Key methods: `remove_pages()`, `child()`, `clip_pages()`, `compress_images()`, `add_named_destinations()`
+   - Key properties: `text`, `text_pages`, `text_page_lines`, `extracted_pages`, `reader`, `writer`
+   - `handwritten_ratio(page_index)` returns the handwritten ratio for a given page (method, not module-level function)
    - Implements corruption detection and recovery
    - Coordinates batch OCR submission for efficiency
 
-4. **Azure OCR Integration** (`azure_docintel_integrator.py`):
+4. **Extracted Page** (`extracted_page.py`):
+   - `ExtractedPage` dataclass tracks page metadata and source (embedded/OCR)
+
+5. **Azure OCR Integration** (`azure_docintel_integrator.py`):
    - `AzureDocIntelIntegrator` class manages Azure Document Intelligence API
    - Singleton pattern with lazy client initialization
    - Handles client creation, PDF submission, and result processing
    - Supports handwritten text detection and confidence scoring
    - Manages OCR result caching and page mapping
 
-5. **Layout Processing** (`layout.py`):
+6. **Layout Processing** (`layout.py`):
    - Handles fixed-width text layout generation from Azure OCR results
    - Manages text positioning, line breaks, and whitespace preservation
    - Applies rotation corrections from OCR results
    - Implements configurable scaling for coordinate systems
+
+7. **Batch Processing** (`batch.py`):
+   - `PdfExtractBatch` for submitting multiple PDFs to Azure OCR in a single API call
+
+8. **Header/Footer Detection** (`header_footer_detection.py`, `page_fingerprint.py`):
+   - `assign_headers_and_footers()`: heuristically marks repeated page elements across documents
+   - `page_fingerprint.py` groups pages by common ancestor document to isolate header/footer patterns
 
 ### Key Design Patterns
 
@@ -156,10 +160,12 @@ When writing code, ensure it passes all three tools:
 ## Environment Variables
 
 ### Azure OCR Configuration
+
 - `AZURE_DOCINTEL_ENDPOINT`: Azure Document Intelligence API endpoint
 - `AZURE_DOCINTEL_SUBSCRIPTION_KEY`: Azure API subscription key
 
 ### AWS Configuration (for S3 support)
+
 - `AWS_ACCESS_KEY_ID`: AWS access key for S3 access
 - `AWS_SECRET_ACCESS_KEY`: AWS secret key
 - `AWS_SESSION_TOKEN`: Optional session token for temporary credentials
@@ -169,27 +175,49 @@ These can also be set programmatically after import via the `constants` global s
 ## Important Implementation Details
 
 ### Memory Optimization
+
 - The codebase avoids using `splitlines()` excessively, using `count('\n')` for line counting instead
 - Text is processed in streaming fashion where possible
 - OCR results are cached to avoid redundant API calls
 
 ### Indexing and Boundaries
+
 - Page indices are 0-based throughout the codebase
 - OCR page indices map to PDF page indices via internal tracking
 
 ### OCR Triggering Logic
+
 - OCR is triggered when the ratio of low-text pages exceeds `TRIGGER_OCR_PAGE_RATIO` (default 0.99)
 - A page is considered "low-text" if it has fewer than `MIN_LINES_OCR_TRIGGER` lines (default 1)
 - Custom glyph replacement is supported via `replace_byte_codes` parameter
 
 ### Error Handling
+
 - Maximum 25,000 characters per page as corruption detection threshold
 - Failed OCR returns empty strings with logged warnings
 - Corrupted pages return empty strings after logging violations
+- `AllPagesRemovedError(ValueError)`: raised by `remove_pages()` and `child(remove_from_parent=True)` when all pages would be removed; pass `raise_on_empty=False` to suppress with a no-op
 
 ### Thread Safety
+
 - The current implementation uses a singleton Azure client - consider thread safety when implementing concurrent processing
 - Progress bars support positioning for multi-threaded scenarios via `pbar_position`
+
+## Development Guardrails
+
+### Testing
+
+Provide test coverage for all new public functions, classes, and methods. Prefer doctest for self-contained methods where a docstring `Example:` section makes sense. Use `tests/` modules for tests requiring fixtures, mocks, or multi-step setup.
+
+### Type Checking
+
+Use proper typing for all new and modified code. Run `pyright` in standard mode before finalizing edits. Config in `pyrightconfig.json` (intentionally relaxes `reportTypedDictNotRequiredAccess` and `reportPossiblyUnboundVariable`). Suppress with `# pyright:ignore[<flag>]` only with user approval and a justifying comment.
+
+### Linting / Formatting
+
+**Linter/formatter**: `ruff` — config in `ruff.toml`. Line length: 99. isort first-party packages listed in `ruff.toml` under `[lint.isort]`.
+
+Run `ruff check pypdftotext/` and `ruff format --check pypdftotext/` before finalizing edits (tests and scripts excluded from linting). Suppress lint warnings with `# noqa: <FLAG>` only with user approval and a justifying comment.
 
 ## Code Style Guidelines
 

@@ -28,6 +28,8 @@ dev = [
   "boto3-stubs[s3]",
   "pytest>=7.0.0",
   "pytest-cov>=4.0.0",
+  "ruff>=0.15.2",
+  "pyright>=1.1.408",
 ]
 
 [project.urls]
@@ -35,7 +37,68 @@ Home = "https://github.com/hank-ai/pypdftotext"
 Issues = "https://github.com/hank-ai/pypdftotext/issues"
 
 [tool.flit.sdist]
-exclude = ["samples/", "tests/", ".devcontainer/", ".vscode/"]
+exclude = [
+  "samples/",
+  "tests/",
+  ".vscode/",
+  ".claude/",
+  "CLAUDE.md",
+  "pypdftotext.code-workspace",
+
+  # Version control
+  ".git/",
+  ".gitignore",
+  ".gitattributes",
+  ".gitmodules",
+
+  # CI / GitHub
+  ".github/",
+  ".travis.yml",
+  ".circleci/",
+  "azure-pipelines.yml",
+  "Jenkinsfile",
+
+  # Dev tooling
+  ".editorconfig",
+  ".pre-commit-config.yaml",
+  ".flake8",
+  ".pylintrc",
+  "tox.ini",
+  "noxfile.py",
+  ".nox/",
+  ".mypy_cache/",
+  ".ruff_cache/",
+  "ruff.toml",
+  "pyrightconfig.json",
+
+  # Test suite
+  "tests/",
+  "conftest.py",
+
+  # Docs source (not the built output, if you include that)
+  "docs/",
+
+  # Build / dist artifacts
+  "dist/",
+  "build/",
+  "*.egg-info/",
+  ".eggs/",
+  "__pycache__/",
+  "*.py[cod]",
+
+  # OS artifacts
+  ".DS_Store",
+  "Thumbs.db",
+  "Desktop.ini",
+
+  # Docker / Vagrant / local env
+  "Dockerfile",
+  "docker-compose*.yml",
+  ".dockerignore",
+  "Vagrantfile",
+  ".env",
+  ".envrc",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -55,3 +118,24 @@ markers = [
   "integration: Integration tests",
   "slow: Slow tests",
 ]
+
+[tool.coverage.run]
+source = ["pypdftotext"]
+omit = ["tests/*", "scripts/*"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "if self.debug:",
+    "if __name__ == .__main__.:",
+    "raise NotImplementedError",
+    "pass",
+    "except ImportError:",
+]
+precision = 2
+show_missing = true
+skip_covered = false
+
+[tool.coverage.html]
+directory = "htmlcov"
