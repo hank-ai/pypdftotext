@@ -792,7 +792,7 @@ class PdfExtract:
         current_fp = self.extracted_pages[0].fingerprint
         self.extracted_pages[0].document_idx = document_idx
         for i in range(1, len(self.extracted_pages)):
-            if self.extracted_pages[i].fingerprint != current_fp:
+            if not self.extracted_pages[i].fingerprint.shares_origin(current_fp):
                 # End of current document
                 document_idx += 1
                 current_fp = self.extracted_pages[i].fingerprint
