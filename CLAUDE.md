@@ -67,6 +67,7 @@ pip install -e ".[dev]"  # All of the above + pytest, pytest-cov, and type stubs
 3. **PDF Extraction Engine** (`pdf_extract.py`):
    - `PdfExtract` class orchestrates the entire extraction workflow
    - Accepts `str | Path | bytes | io.BytesIO | PdfReader`; a `str` may be an `s3://` URI
+   - `config` param accepts `PyPdfToTextConfig`, a dict of overrides, or `None`
    - Key methods: `remove_pages()`, `child()`, `clip_pages()`, `compress_images()`, `add_named_destinations()`
    - Key properties: `text`, `text_pages`, `text_page_lines`, `extracted_pages`, `reader`, `writer`
    - `handwritten_ratio(page_index)` returns the handwritten ratio for a given page (method, not module-level function)
@@ -91,6 +92,7 @@ pip install -e ".[dev]"  # All of the above + pytest, pytest-cov, and type stubs
 
 7. **Batch Processing** (`batch.py`):
    - `PdfExtractBatch` for submitting multiple PDFs to Azure OCR in a single API call
+   - `config` param accepts `PyPdfToTextConfig`, a dict of overrides, or `None` (same as `PdfExtract`)
 
 8. **Header/Footer Detection** (`header_footer_detection.py`, `page_fingerprint.py`):
    - `assign_headers_and_footers()`: heuristically marks repeated page elements across documents

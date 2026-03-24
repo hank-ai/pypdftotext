@@ -81,9 +81,11 @@ class PdfExtract:
     def __init__(
         self,
         pdf: str | Path | bytes | io.BytesIO | PdfReader,
-        config: PyPdfToTextConfig | None = None,
+        config: PyPdfToTextConfig | PyPdfToTextConfigOverrides | None = None,
         **kwargs,
     ) -> None:
+        if isinstance(config, dict):
+            config = PyPdfToTextConfig(overrides=config)
         self.config = config or PyPdfToTextConfig()
         self.corruption_detected: bool = False
         self.body: bytes

@@ -12,7 +12,7 @@ from azure.core.exceptions import AzureError
 from pypdf import PdfReader
 from tqdm import tqdm
 
-from ._config import PyPdfToTextConfig
+from ._config import PyPdfToTextConfig, PyPdfToTextConfigOverrides
 from .azure_docintel_integrator import AzureDocIntelIntegrator
 from .header_footer_detection import assign_headers_and_footers
 from .pdf_extract import PdfExtract
@@ -48,7 +48,7 @@ class PdfExtractBatch:
             Sequence[str | Path | bytes | io.BytesIO | PdfReader]
             | Mapping[str, str | Path | bytes | io.BytesIO | PdfReader]
         ),
-        config: PyPdfToTextConfig | None = None,
+        config: PyPdfToTextConfig | PyPdfToTextConfigOverrides | None = None,
         **kwargs,
     ) -> None:
         if not isinstance(pdfs, (list, dict)):
@@ -58,6 +58,8 @@ class PdfExtractBatch:
         self.pdfs = (
             pdfs if isinstance(pdfs, dict) else {f"PDF[{i}]": pdf for i, pdf in enumerate(pdfs)}
         )
+        if isinstance(config, dict):
+            config = PyPdfToTextConfig(overrides=config)
         self.config = config or PyPdfToTextConfig()
         self.kwargs = kwargs
         logger.info("Starting batch extraction for %s PDFs", len(self.pdfs))
