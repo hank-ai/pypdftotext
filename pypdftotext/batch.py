@@ -74,7 +74,10 @@ class PdfExtractBatch:
         }
         pdf_extracts: dict[str, PdfExtract] = {
             pdf_name: PdfExtract(
-                pdf=pdf, config=self.config, **{**self.kwargs, "_batch_mode": True}
+                pdf=pdf,
+                config=self.config,
+                pdf_name=pdf_name,
+                **{**self.kwargs, "_batch_mode": True},
             )
             for pdf_name, pdf in self.pdfs.items()
             if pdf_name not in s3_uris or len(s3_uris) == 1
@@ -114,7 +117,10 @@ class PdfExtractBatch:
         pdf_name, s3_uri = s3_uri_tuple
         try:
             extract = PdfExtract(
-                pdf=s3_uri, config=self.config, **{**self.kwargs, "_batch_mode": True}
+                pdf=s3_uri,
+                config=self.config,
+                pdf_name=pdf_name,
+                **{**self.kwargs, "_batch_mode": True},
             )
             return pdf_name, extract
         except Exception as e:  # noqa: BLE001  # batch must survive per-item S3 failures; caller expects Exception in result

@@ -68,6 +68,7 @@ pip install -e ".[dev]"  # All of the above + pytest, pytest-cov, and type stubs
    - `PdfExtract` class orchestrates the entire extraction workflow
    - Accepts `str | Path | bytes | io.BytesIO | PdfReader`; a `str` may be an `s3://` URI
    - `config` param accepts `PyPdfToTextConfig`, a dict of overrides, or `None`
+   - `pdf_name` keyword-only param: human-readable identifier for logging in parallel scenarios. Auto-derived from input (path stem, PdfReader metadata title, or SHA-256 hash fallback) if not supplied.
    - Key methods: `remove_pages()`, `child()`, `clip_pages()`, `compress_images()`, `add_named_destinations()`
    - Key properties: `text`, `text_pages`, `text_page_lines`, `extracted_pages`, `reader`, `writer`
    - `handwritten_ratio(page_index)` returns the handwritten ratio for a given page (method, not module-level function)
@@ -100,6 +101,7 @@ pip install -e ".[dev]"  # All of the above + pytest, pytest-cov, and type stubs
 
 ### Key Design Patterns
 
+- **Keyword-Only Parameters**: `PdfExtract.__init__` uses `*` separator — params like `pdf_name` are keyword-only, followed by `**kwargs` for internal params (`debug_path`, `compressed`, `init_extracted_pages`, `_batch_mode`)
 - **Lazy Initialization**: Azure OCR client created only when needed
 - **Fallback Strategy**: Attempts embedded text extraction first, falls back to OCR based on configurable thresholds
 - **Corruption Detection**: Validates extracted text length against `MAX_CHARS_PER_PDF_PAGE` to detect malformed PDFs
@@ -161,6 +163,8 @@ These can also be set programmatically after import via the `constants` global s
 ### Thread Safety
 
 - The current implementation uses a singleton Azure client - consider thread safety when implementing concurrent processing
+- `PdfReader` (and the `reader` property) is NOT thread safe — avoid triggering lazy reader init from multiple threads
+- `pdf_name` derivation avoids triggering lazy reader init for bytes/BytesIO inputs for this reason
 - Progress bars support positioning for multi-threaded scenarios via `pbar_position`
 
 ## Development Guardrails
@@ -168,6 +172,8 @@ These can also be set programmatically after import via the `constants` global s
 ### Testing
 
 Provide test coverage for all new public functions, classes, and methods. Prefer doctest for self-contained methods where a docstring `Example:` section makes sense. Use `tests/` modules for tests requiring fixtures, mocks, or multi-step setup.
+
+`PdfReader.metadata` is a read-only property — use `unittest.mock.patch.object(type(reader), "metadata", new_callable=PropertyMock)` to mock it in tests.
 
 ### Type Checking
 
