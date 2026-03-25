@@ -18,6 +18,7 @@ pypdftotext is a Python package that intelligently extracts text from PDF files.
 - 🖼️ **Image compression** to reduce PDF file sizes
 - ✍️ **Handwritten text detection** with confidence scoring
 - 📄 **Page manipulation** - create child PDFs and extract page subsets
+- 📑 **Header/footer detection** - heuristic stripping of repeated page elements
 - ⚙️ **Flexible configuration** with built-in env support and multiple inheritance options
 
 ## Installation
@@ -57,9 +58,10 @@ pip install "pypdftotext[dev]"
 
 ### Enable Azure OCR (optional)
 
-> NOTE: If OCR has not been configured, only the text embedded directly in the pdf will be returned (using [pypdf's](https://pypdf.readthedocs.io/en/stable/user/extract-text.html) layout mode).
+> NOTE: If OCR has not been configured, only the text embedded directly in the pdf will be returned (using [pypdf's](https://pypdf.readthedocs.io/en/stable/user/extract-text.html) layout mode). You can also explicitly disable OCR by setting `DISABLE_OCR=True` in your config.
 
 #### OCR Prerequisites
+
 - An Azure Subscription ([create one for free](https://azure.microsoft.com/free/cognitive-services/))
 - An Azure Document Intelligence resource ([create one](https://portal.azure.com/#create/Microsoft.CognitiveServicesFormRecognizer))
 
@@ -67,14 +69,14 @@ pip install "pypdftotext[dev]"
 
 > NOTE: The same behaviors apply to the AWS_* settings for pulling PDFs from S3.
 
-##### You can set your Endpoint and Subscription Key globally via env vars:
+##### You can set your Endpoint and Subscription Key globally via env vars
 
 ```bash
 export AZURE_DOCINTEL_ENDPOINT="https://your-resource.cognitiveservices.azure.com/"
 export AZURE_DOCINTEL_SUBSCRIPTION_KEY="your-subscription-key"
 ```
 
-##### Or via the `constants` module:
+##### Or via the `constants` module
 
 ```python
 from pypdftotext import constants
@@ -87,10 +89,17 @@ You can also set these values for individual instances of the PyPdfToTextConfig 
 ### Basic Usage
 
 #### Create a PdfExtract Instance
+
 ```python
 from pypdftotext import PdfExtract
 
 extract = PdfExtract("document.pdf")
+
+# Optional: supply a human-readable name for log output (useful in parallel scenarios)
+extract = PdfExtract("document.pdf", pdf_name="quarterly-report")
+
+# The config parameter also accepts a plain dict of overrides
+extract = PdfExtract("document.pdf", config={"DISABLE_OCR": True})
 ```
 
 #### Optional: Customize the Config
@@ -122,9 +131,9 @@ for i, page_text in enumerate(extract.text_pages):
 
 ```python
 extract.compress_images(  # always converts images to greyscale
-    white_point = 200,  # pixels with values from 201 to 255 are set to 255 (white) to remove scanner artifacts
-    aspect_tolerance=0.01,  # resizes images whose aspect ratios (width/height) are within 0.01 of the page aspect ratio
-    max_overscale = 1.5,  # images having a width more than 1.5x the displayed width of the PDF page are downsampled to 1.5x
+    white_point = 220,  # pixels with values from 221 to 255 are set to 255 (white) to remove scanner artifacts
+    aspect_tolerance=0.001,  # resizes images whose aspect ratios (width/height) are within 0.001 of the page aspect ratio
+    max_overscale = 2,  # images having a width more than 2x the displayed width of the PDF page are downsampled to 2x
 )
 ```
 
@@ -146,12 +155,20 @@ extract_child = extract.child((0, 9))  # useful for passing config and metadata 
 clipped_pages_pdf_bytes = extract_child.clip_pages([0, 2, 4])  # useful for quick splitting.
 ```
 
+`child()` also supports `remove_from_parent=True` to move pages out of the parent, and `raise_on_empty=False` to suppress `AllPagesRemovedError` when all pages would be removed.
+
+#### Adding Bookmarks
+
+```python
+extract.add_named_destinations([("Chapter 1", 0), ("Chapter 2", 5)])
+```
+
 ### Batch Processing
 
 Process multiple PDFs efficiently with parallel OCR:
 
 ```python
-from pypdftotext.batch import PdfExtractBatch
+from pypdftotext import PdfExtractBatch
 
 # Process multiple PDFs (list or dict)
 pdfs = ["file1.pdf", "file2.pdf", "file3.pdf"]
@@ -166,9 +183,10 @@ for name, pdf_extract in results.items():
     print(f"{name}: {len(pdf_extract.text)} characters extracted")
 ```
 
-Batch processing extracts embedded text sequentially, then performs OCR in parallel for all PDFs that need it.
+Batch processing extracts embedded text sequentially, then performs OCR in parallel for all PDFs that need it. It also heuristically detects and strips repeated headers and footers across pages (configurable via `MAX_HEADER_LINES`, `MAX_FOOTER_LINES`, and related config options; disabled by default).
 
 ### S3 Support
+
 If an S3 URI (e.g. `s3://my-bucket/path/to/document.pdf`) is supplied as the `pdf` parameter, `PdfExtract` will attempt to pull the bytes from the supplied bucket/key. AWS credentials with proper permissions must be supplied as env vars or set programmatically [as described for Azure OCR above](#ocr-configuration) or an error will result.
 
 ## Implementation Details
@@ -176,10 +194,12 @@ If an S3 URI (e.g. `s3://my-bucket/path/to/document.pdf`) is supplied as the `pd
 ### OCR Triggering Logic
 
 OCR is automatically triggered when:
+
 1. The ratio of low-text pages exceeds `TRIGGER_OCR_PAGE_RATIO` (default: 99% of pages)
 2. A page is considered "low-text" if it has < `MIN_LINES_OCR_TRIGGER` lines (default: 1)
 
 Example: OCR only when 50% of pages have fewer than 5 lines:
+
 ```python
 config = PyPdfToTextConfig(
     overrides={
@@ -211,5 +231,6 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## Acknowledgments
 
 Built on top of:
+
 - [pypdf](https://github.com/py-pdf/pypdf) for PDF parsing
 - [Azure Document Intelligence](https://azure.microsoft.com/en-us/services/cognitive-services/form-recognizer/) for OCR capabilities

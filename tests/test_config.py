@@ -100,3 +100,50 @@ class TestPyPdfToTextConfig:
 
         # Invalid field isn't set as attribute
         assert not hasattr(config, "INVALID_FIELD")
+
+
+class TestDictConfigShorthand:
+    """Test that PdfExtract and PdfExtractBatch accept a dict as the config parameter."""
+
+    @pytest.mark.unit
+    def test_pdf_extract_accepts_dict_config(self):
+        """PdfExtract(config={...}) builds a PyPdfToTextConfig from the dict."""
+        from pypdftotext import PdfExtract
+
+        extract = PdfExtract(pdf=b"%PDF-1.4 minimal", config={"DISABLE_OCR": True})
+        assert isinstance(extract.config, PyPdfToTextConfig)
+        assert extract.config.DISABLE_OCR is True
+
+    @pytest.mark.unit
+    def test_pdf_extract_dict_config_multiple_overrides(self):
+        """Multiple overrides in a dict are all applied."""
+        from pypdftotext import PdfExtract
+
+        extract = PdfExtract(
+            pdf=b"%PDF-1.4 minimal",
+            config={"DISABLE_OCR": True, "MIN_LINES_OCR_TRIGGER": 10},
+        )
+        assert extract.config.DISABLE_OCR is True
+        assert extract.config.MIN_LINES_OCR_TRIGGER == 10
+
+    @pytest.mark.unit
+    def test_pdf_extract_explicit_config_still_works(self):
+        """Existing PyPdfToTextConfig usage is unchanged (regression guard)."""
+        from pypdftotext import PdfExtract
+
+        config = PyPdfToTextConfig(overrides={"DISABLE_OCR": True})
+        extract = PdfExtract(pdf=b"%PDF-1.4 minimal", config=config)
+        assert extract.config is config
+        assert extract.config.DISABLE_OCR is True
+
+    @pytest.mark.unit
+    def test_pdf_extract_batch_accepts_dict_config(self):
+        """PdfExtractBatch(config={...}) propagates the built config."""
+        from pypdftotext import PdfExtractBatch
+
+        batch = PdfExtractBatch(
+            pdfs=[b"%PDF-1.4 minimal"],
+            config={"DISABLE_OCR": True},
+        )
+        assert isinstance(batch.config, PyPdfToTextConfig)
+        assert batch.config.DISABLE_OCR is True

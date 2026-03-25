@@ -58,13 +58,14 @@ class AzureDocIntelIntegrator:
         """Clear last_result from previous run."""
         self.last_result = AnalyzeResult({})
 
-    def ocr_pages(self, pdf: bytes, pages: list[int]) -> list[str]:
+    def ocr_pages(self, pdf: bytes, pages: list[int], pdf_name: str = "") -> list[str]:
         """
         Read the text from supplied pdf page indices.
 
         Args:
             pdf: bytes of a pdf file
             pages: list of pdf page indices to OCR
+            pdf_name: optional identifier included in log messages for parallel tracing
 
         Returns:
             list[str]: list of strings containing structured text extracted
@@ -78,14 +79,17 @@ class AzureDocIntelIntegrator:
             )
             return []
         assert self.client is not None
-        logger.info("Sending pdf of %s bytes for OCR of %s pages.", len(pdf), len(pages))
+        prefix = f"[{pdf_name}] " if pdf_name else ""
+        logger.info("%sSending pdf of %s bytes for OCR of %s pages.", prefix, len(pdf), len(pages))
         poller: AnalyzeDocumentLROPoller = self.client.begin_analyze_document(
             model_id=self.config.AZURE_DOCINTEL_MODEL,
             body=io.BytesIO(pdf),
             pages=",".join(str(pg + 1) for pg in pages),
         )
         self.last_result = poller.result(self.config.AZURE_DOCINTEL_TIMEOUT)
-        logger.info("%s pages OCR'd successfully. Creating fixed width pages.", len(pages))
+        logger.info(
+            "%s%s pages OCR'd successfully. Creating fixed width pages.", prefix, len(pages)
+        )
         ocr_pbar = tqdm(
             self.last_result.pages,
             desc="Processing OCR results...",

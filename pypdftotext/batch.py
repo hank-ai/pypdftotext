@@ -12,7 +12,7 @@ from azure.core.exceptions import AzureError
 from pypdf import PdfReader
 from tqdm import tqdm
 
-from ._config import PyPdfToTextConfig
+from ._config import PyPdfToTextConfig, PyPdfToTextConfigOverrides
 from .azure_docintel_integrator import AzureDocIntelIntegrator
 from .header_footer_detection import assign_headers_and_footers
 from .pdf_extract import PdfExtract
@@ -32,7 +32,10 @@ class PdfExtractBatch:
 
     Args:
         pdfs: List or mapping of PDF inputs (str | Path | bytes | io.BytesIO | PdfReader)
-        config: Configuration to use for all PDFs (defaults to PyPdfToTextConfig())
+        config: a PyPdfToTextConfig instance, a dict of config-field overrides
+            (e.g. ``{"DISABLE_OCR": True}``), or None. A dict is converted to
+            ``PyPdfToTextConfig(overrides=config)`` automatically. Defaults to
+            ``PyPdfToTextConfig()``.
         **kwargs: Additional arguments passed to PdfExtract instances
 
     Usage:
@@ -48,7 +51,7 @@ class PdfExtractBatch:
             Sequence[str | Path | bytes | io.BytesIO | PdfReader]
             | Mapping[str, str | Path | bytes | io.BytesIO | PdfReader]
         ),
-        config: PyPdfToTextConfig | None = None,
+        config: PyPdfToTextConfig | PyPdfToTextConfigOverrides | None = None,
         **kwargs,
     ) -> None:
         if not isinstance(pdfs, (list, dict)):
@@ -58,6 +61,13 @@ class PdfExtractBatch:
         self.pdfs = (
             pdfs if isinstance(pdfs, dict) else {f"PDF[{i}]": pdf for i, pdf in enumerate(pdfs)}
         )
+        if kwargs.pop("pdf_name", None) is not None:
+            logger.warning(
+                "pdf_name is not a valid kwarg for PdfExtractBatch, dumbass — "
+                "each PDF's name is derived from its dict key or list index. Ignoring."
+            )
+        if isinstance(config, dict):
+            config = PyPdfToTextConfig(overrides=config)
         self.config = config or PyPdfToTextConfig()
         self.kwargs = kwargs
         logger.info("Starting batch extraction for %s PDFs", len(self.pdfs))
@@ -72,7 +82,10 @@ class PdfExtractBatch:
         }
         pdf_extracts: dict[str, PdfExtract] = {
             pdf_name: PdfExtract(
-                pdf=pdf, config=self.config, **{**self.kwargs, "_batch_mode": True}
+                pdf=pdf,
+                config=self.config,
+                pdf_name=pdf_name,
+                **{**self.kwargs, "_batch_mode": True},
             )
             for pdf_name, pdf in self.pdfs.items()
             if pdf_name not in s3_uris or len(s3_uris) == 1
@@ -112,7 +125,10 @@ class PdfExtractBatch:
         pdf_name, s3_uri = s3_uri_tuple
         try:
             extract = PdfExtract(
-                pdf=s3_uri, config=self.config, **{**self.kwargs, "_batch_mode": True}
+                pdf=s3_uri,
+                config=self.config,
+                pdf_name=pdf_name,
+                **{**self.kwargs, "_batch_mode": True},
             )
             return pdf_name, extract
         except Exception as e:  # noqa: BLE001  # batch must survive per-item S3 failures; caller expects Exception in result

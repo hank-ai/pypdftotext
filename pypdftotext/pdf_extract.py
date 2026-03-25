@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import logging
@@ -61,10 +62,16 @@ class PdfExtract:
         pdf (str | Path | bytes | io.BytesIO | PdfReader): if str, check for s3
             download if boto3 is installed and value is an s3 uri (i.e. prefixed 's3://').
             otherwise attempt read from disk.
-        config: a PyPdfToTextConfig instance that inherits from the global base config
-            `constants` by default. See PyPdfToTextConfig docstring for more info.
+        config: a PyPdfToTextConfig instance, a dict of config-field overrides
+            (e.g. ``{"DISABLE_OCR": True}``), or None. A dict is converted to
+            ``PyPdfToTextConfig(overrides=config)`` automatically. Defaults to the
+            global base config ``constants``.
 
     KwArgs:
+        pdf_name (str | None): optional human-readable identifier for this PDF.
+            Used in log messages to distinguish PDFs during parallel processing.
+            Auto-derived from the input if not supplied (filename, metadata title,
+            or content hash).
         debug_path (Path | None, optional): Path to write pypdf debug files to.
             Defaults to None.
         replace_byte_codes (dict[bytes, bytes] | None): if supplied, raw
@@ -81,9 +88,13 @@ class PdfExtract:
     def __init__(
         self,
         pdf: str | Path | bytes | io.BytesIO | PdfReader,
-        config: PyPdfToTextConfig | None = None,
+        config: PyPdfToTextConfig | PyPdfToTextConfigOverrides | None = None,
+        *,
+        pdf_name: str | None = None,
         **kwargs,
     ) -> None:
+        if isinstance(config, dict):
+            config = PyPdfToTextConfig(overrides=config)
         self.config = config or PyPdfToTextConfig()
         self.corruption_detected: bool = False
         self.body: bytes
@@ -100,7 +111,11 @@ class PdfExtract:
         # set initial body value
         if isinstance(pdf, str):
             if pdf.startswith("s3://"):
-                logger.info("Attempting to pull URI '%s' from s3", pdf)
+                logger.info(
+                    "[%s] Pulling URI '%s' from S3",
+                    pdf_name or pdf.rsplit("/", 1)[-1],
+                    pdf,
+                )
                 bucket, _, key = pdf[5:].partition("/")
                 s3_object = self.s3.get_object(Bucket=bucket, Key=key)
                 self.body = s3_object["Body"].read()
@@ -120,6 +135,32 @@ class PdfExtract:
             self._reader = pdf
             assert isinstance(self._reader.stream, io.BytesIO)
             self.body = self._reader.stream.getvalue()
+
+        self.pdf_name = self._derive_pdf_name(pdf, pdf_name)
+
+    def _derive_pdf_name(
+        self,
+        pdf: str | Path | bytes | io.BytesIO | PdfReader,
+        explicit_name: str | None,
+    ) -> str:
+        """Derive a human-readable identifier for this PDF instance."""
+        if explicit_name:
+            return explicit_name
+        if isinstance(pdf, str):
+            filename = pdf.rsplit("/", 1)[-1] if "/" in pdf else Path(pdf).name
+            if filename:
+                return filename
+        elif isinstance(pdf, Path):
+            if pdf.name:
+                return pdf.name
+        elif isinstance(pdf, PdfReader):
+            meta = self._reader.metadata if self._reader else None
+            if meta and meta.title:
+                title = re.split(r"[\r\n\t]+", meta.title.strip(" \r\n\t"))[0].strip()
+                title = "".join(c for c in title if c.isprintable())
+                if title:
+                    return title[:256]  # cap at 256, a common filenae length constraint.
+        return f"{hashlib.sha256(self.body).hexdigest()[:8]}.pdf"
 
     @property
     def extracted_pages(self) -> list[ExtractedPage]:
@@ -156,7 +197,7 @@ class PdfExtract:
     def reader(self) -> PdfReader:
         """The PDF reader used for text extraction. **NOT THREAD SAFE.**"""
         if self._reader is None:
-            logger.debug("Initializing PdfReader for PdfExtract")
+            logger.debug("[%s] Initializing PdfReader", self.pdf_name)
             self._reader = PdfReader(io.BytesIO(self.body))
         return self._reader
 
@@ -165,7 +206,7 @@ class PdfExtract:
         """The PDF writer used for image compression, child creation,
         and page rotations. **NOT THREAD SAFE.**"""
         if self._writer is None:
-            logger.debug("Initializing PdfWriter for PdfExtract")
+            logger.debug("[%s] Initializing PdfWriter", self.pdf_name)
             if self._extracted_pages:
                 self._writer = PdfWriter()
                 self._writer.append(
@@ -216,7 +257,8 @@ class PdfExtract:
             if self._pbar:
                 self._pbar.set_postfix_str("!!! CORRUPTION DETECTED !!!")
             logger.warning(
-                "Clearing corrupt pdf text pg_idx=%s; len(txt)=%s > %s char limit.",
+                "[%s] Clearing corrupt pdf text pg_idx=%s; len(txt)=%s > %s char limit.",
+                self.pdf_name,
                 pg_idx,
                 len(txt),
                 self.config.MAX_CHARS_PER_PDF_PAGE,
@@ -303,7 +345,7 @@ class PdfExtract:
                     for old_bytes, new_bytes in (self.config.REPLACE_BYTE_CODES or {}).items()
                 ]
 
-            ocr_pages = azure.ocr_pages(self.body, self.ocr_page_idxs)
+            ocr_pages = azure.ocr_pages(self.body, self.ocr_page_idxs, pdf_name=self.pdf_name)
             if self.debug_path:
                 (self.debug_path / "ocr_pages.json").write_text(
                     json.dumps(ocr_pages, indent=2, default=str), "utf-8"
@@ -319,8 +361,9 @@ class PdfExtract:
                 txt = ocr_pages[ocr_idx]
                 if len(txt) > self.config.MAX_CHARS_PER_PDF_PAGE:
                     logger.warning(
-                        "Clearing corrupt OCR text pg_idx=%s; len(txt)=%s > %s char limit."
+                        "[%s] Clearing corrupt OCR text pg_idx=%s; len(txt)=%s > %s char limit."
                         " Does page contain multiple text orientations?",
+                        self.pdf_name,
                         og_pg_idx,
                         len(txt),
                         self.config.MAX_CHARS_PER_PDF_PAGE,
@@ -344,7 +387,7 @@ class PdfExtract:
                 ext_pg.azure_page = azure.page_at_index(og_pg_idx)
 
         if rotated_pages:
-            logger.debug("Regenerating PdfExtract body with corrected page orientations.")
+            logger.debug("[%s] Regenerating body with corrected page orientations.", self.pdf_name)
             self._regenerate_body()
 
     @overload
@@ -437,8 +480,9 @@ class PdfExtract:
                     "suppress this error and perform a no-op instead."
                 )
             logger.warning(
-                "remove_pages() would remove all pages — no-op performed. "
-                "Pass raise_on_empty=True (default) to raise AllPagesRemovedError instead."
+                "[%s] remove_pages() would remove all pages — no-op performed. "
+                "Pass raise_on_empty=True (default) to raise AllPagesRemovedError instead.",
+                self.pdf_name,
             )
             return
         if len(self._extracted_pages) < len(starting_pages):
@@ -451,6 +495,7 @@ class PdfExtract:
         config_overrides: PyPdfToTextConfigOverrides | None = None,
         remove_from_parent: bool = False,
         raise_on_empty: bool = True,
+        pdf_name: str | None = None,
     ) -> PdfExtract | None:
         """
         Run the 'page_indices' test function on all extracted pages and include
@@ -466,6 +511,8 @@ class PdfExtract:
             raise_on_empty (bool): When remove_from_parent=True, controls behavior if
                 all parent pages are selected. If True (default), raises
                 AllPagesRemovedError. If False, performs a no-op on the parent instead.
+            pdf_name (str | None): optional name for the child. Inherits parent's
+                pdf_name if not supplied.
 
         Returns:
             PdfExtract | None: a child instance containing the pages specified or
@@ -479,6 +526,7 @@ class PdfExtract:
         config_overrides: PyPdfToTextConfigOverrides | None = None,
         remove_from_parent: bool = False,
         raise_on_empty: bool = True,
+        pdf_name: str | None = None,
     ) -> PdfExtract:
         """
         Include pages at the indices supplied in 'page_indices'.
@@ -492,6 +540,8 @@ class PdfExtract:
             raise_on_empty (bool): When remove_from_parent=True, controls behavior if
                 all parent pages are selected. If True (default), raises
                 AllPagesRemovedError. If False, performs a no-op on the parent instead.
+            pdf_name (str | None): optional name for the child. Inherits parent's
+                pdf_name if not supplied.
 
         Returns:
             PdfExtract: a child instance containing the pages specified.
@@ -504,6 +554,7 @@ class PdfExtract:
         config_overrides: PyPdfToTextConfigOverrides | None = None,
         remove_from_parent: bool = False,
         raise_on_empty: bool = True,
+        pdf_name: str | None = None,
     ) -> PdfExtract:
         """
         Include pages between the supplied indices *inclusive*.
@@ -517,6 +568,8 @@ class PdfExtract:
             raise_on_empty (bool): When remove_from_parent=True, controls behavior if
                 all parent pages are selected. If True (default), raises
                 AllPagesRemovedError. If False, performs a no-op on the parent instead.
+            pdf_name (str | None): optional name for the child. Inherits parent's
+                pdf_name if not supplied.
 
         Returns:
             PdfExtract: a child instance containing the pages specified.
@@ -528,6 +581,7 @@ class PdfExtract:
         config_overrides: PyPdfToTextConfigOverrides | None = None,
         remove_from_parent: bool = False,
         raise_on_empty: bool = True,
+        pdf_name: str | None = None,
     ) -> PdfExtract | None:
         """
         Creates a child PdfExtract instance for the selected pages preserving
@@ -543,6 +597,8 @@ class PdfExtract:
                 all parent pages are selected. If True (default), raises
                 AllPagesRemovedError and leaves the parent unchanged. If False,
                 performs a no-op on the parent and logs a warning instead.
+            pdf_name (str | None): optional name for the child. Inherits parent's
+                pdf_name if not supplied.
 
         Returns:
             PdfExtract | None: a child instance containing the pages specified or
@@ -567,6 +623,7 @@ class PdfExtract:
         child_extract = PdfExtract(
             pdf=self.clip_pages(page_indices),
             config=PyPdfToTextConfig(base=self.config, overrides=config_overrides),
+            pdf_name=pdf_name or self.pdf_name,
             init_extracted_pages=[
                 pg for idx, pg in enumerate(self.extracted_pages) if idx in page_indices
             ],
@@ -606,7 +663,7 @@ class PdfExtract:
         if Image is None or ImageOps is None:
             raise ImportError("PIL not found. Run `pip install pypdftotext[image]`.")
         if self.compressed and not force:
-            logger.info("PdfExtract images are already compressed. No action taken.")
+            logger.info("[%s] Images already compressed. No action taken.", self.pdf_name)
             return  # we've already compressed these images
         for ip, page in enumerate(self.writer.pages):
             for ii, img in enumerate(page.images):
