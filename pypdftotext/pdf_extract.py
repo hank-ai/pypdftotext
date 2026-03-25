@@ -8,7 +8,7 @@ import json
 import logging
 import re
 from collections.abc import Callable
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from typing import TYPE_CHECKING, overload
 
 from pypdf import PageObject, PdfReader, PdfWriter
@@ -62,13 +62,15 @@ class PdfExtract:
         pdf (str | Path | bytes | io.BytesIO | PdfReader): if str, check for s3
             download if boto3 is installed and value is an s3 uri (i.e. prefixed 's3://').
             otherwise attempt read from disk.
-        config: a PyPdfToTextConfig instance that inherits from the global base config
-            `constants` by default. See PyPdfToTextConfig docstring for more info.
+        config: a PyPdfToTextConfig instance, a dict of config-field overrides
+            (e.g. ``{"DISABLE_OCR": True}``), or None. A dict is converted to
+            ``PyPdfToTextConfig(overrides=config)`` automatically. Defaults to the
+            global base config ``constants``.
 
     KwArgs:
         pdf_name (str | None): optional human-readable identifier for this PDF.
             Used in log messages to distinguish PDFs during parallel processing.
-            Auto-derived from the input if not supplied (path stem, metadata title,
+            Auto-derived from the input if not supplied (filename, metadata title,
             or content hash).
         debug_path (Path | None, optional): Path to write pypdf debug files to.
             Defaults to None.
@@ -111,7 +113,7 @@ class PdfExtract:
             if pdf.startswith("s3://"):
                 logger.info(
                     "[%s] Pulling URI '%s' from S3",
-                    pdf_name or PurePosixPath(pdf).stem or pdf,
+                    pdf_name or pdf.rsplit("/", 1)[-1],
                     pdf,
                 )
                 bucket, _, key = pdf[5:].partition("/")
@@ -145,17 +147,20 @@ class PdfExtract:
         if explicit_name:
             return explicit_name
         if isinstance(pdf, str):
-            stem = PurePosixPath(pdf).stem if pdf.startswith("s3://") else Path(pdf).stem
-            if stem:
-                return stem
+            filename = pdf.rsplit("/", 1)[-1] if "/" in pdf else Path(pdf).name
+            if filename:
+                return filename
         elif isinstance(pdf, Path):
-            if pdf.stem:
-                return pdf.stem
+            if pdf.name:
+                return pdf.name
         elif isinstance(pdf, PdfReader):
             meta = self._reader.metadata if self._reader else None
             if meta and meta.title:
-                return meta.title
-        return f"pdf_{hashlib.sha256(self.body).hexdigest()[:8]}"
+                title = re.split(r"[\r\n\t]+", meta.title.strip(" \r\n\t"))[0].strip()
+                title = "".join(c for c in title if c.isprintable())
+                if title:
+                    return title[:256]  # cap at 256, a common filenae length constraint.
+        return f"{hashlib.sha256(self.body).hexdigest()[:8]}.pdf"
 
     @property
     def extracted_pages(self) -> list[ExtractedPage]:

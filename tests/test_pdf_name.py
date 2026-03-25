@@ -32,27 +32,27 @@ class TestPdfNameDerivation(unittest.TestCase):
         self.assertEqual(extract.pdf_name, "my_doc")
 
     def test_str_file_path(self):
-        """String file path derives name from stem."""
+        """String file path derives name from filename."""
         extract = PdfExtract(str(self.deid_epic_pdf), config=self.config)
-        self.assertEqual(extract.pdf_name, "deid_epic")
+        self.assertEqual(extract.pdf_name, "deid_epic.pdf")
 
     def test_path_object(self):
-        """Path object derives name from stem."""
+        """Path object derives name from filename."""
         extract = PdfExtract(self.deid_epic_pdf, config=self.config)
-        self.assertEqual(extract.pdf_name, "deid_epic")
+        self.assertEqual(extract.pdf_name, "deid_epic.pdf")
 
     def test_bytes_input(self):
-        """Bytes input falls back to hash-based name."""
+        """Bytes input falls back to hash-based filename."""
         extract = PdfExtract(self.pdf_bytes, config=self.config)
-        self.assertRegex(extract.pdf_name, r"^pdf_[0-9a-f]{8}$")
+        self.assertRegex(extract.pdf_name, r"^[0-9a-f]{8}\.pdf$")
 
     def test_bytesio_input(self):
-        """BytesIO input falls back to hash-based name."""
+        """BytesIO input falls back to hash-based filename."""
         extract = PdfExtract(io.BytesIO(self.pdf_bytes), config=self.config)
-        self.assertRegex(extract.pdf_name, r"^pdf_[0-9a-f]{8}$")
+        self.assertRegex(extract.pdf_name, r"^[0-9a-f]{8}\.pdf$")
 
     def test_bytes_hash_is_deterministic(self):
-        """Same bytes always produce the same hash-based name."""
+        """Same bytes always produce the same hash-based filename."""
         ext1 = PdfExtract(self.pdf_bytes, config=self.config)
         ext2 = PdfExtract(self.pdf_bytes, config=self.config)
         self.assertEqual(ext1.pdf_name, ext2.pdf_name)
@@ -65,45 +65,45 @@ class TestPdfNameDerivation(unittest.TestCase):
         if reader.metadata and reader.metadata.title:
             self.assertEqual(extract.pdf_name, reader.metadata.title)
         else:
-            self.assertRegex(extract.pdf_name, r"^pdf_[0-9a-f]{8}$")
+            self.assertRegex(extract.pdf_name, r"^[0-9a-f]{8}\.pdf$")
 
     def test_pdfreader_without_title(self):
-        """PdfReader without metadata title falls back to hash."""
+        """PdfReader without metadata title falls back to hash-based filename."""
         reader = PdfReader(io.BytesIO(self.pdf_bytes))
         with unittest.mock.patch.object(type(reader), "metadata", new_callable=PropertyMock) as m:
             m.return_value = MagicMock(title=None)
             extract = PdfExtract(reader, config=self.config)
-            self.assertRegex(extract.pdf_name, r"^pdf_[0-9a-f]{8}$")
+            self.assertRegex(extract.pdf_name, r"^[0-9a-f]{8}\.pdf$")
 
     def test_explicit_name_overrides_path(self):
         """Explicit pdf_name overrides path-based derivation."""
         extract = PdfExtract(str(self.deid_epic_pdf), config=self.config, pdf_name="override")
         self.assertEqual(extract.pdf_name, "override")
 
-    def test_s3_uri_derives_stem(self):
-        """S3 URI string derives name from the object key stem."""
-        # Can't actually download from S3, but we can test the derivation
-        # by verifying the _derive_pdf_name method directly
+    def test_s3_uri_derives_filename(self):
+        """S3 URI string derives name from the object key filename."""
         extract = PdfExtract(self.pdf_bytes, config=self.config)
-        # Test the method directly with an S3-like string
         name = extract._derive_pdf_name("s3://bucket/path/to/report.pdf", None)
-        self.assertEqual(name, "report")
+        self.assertEqual(name, "report.pdf")
 
-    def test_s3_uri_bucket_root_derives_bucket_name(self):
-        """S3 URI with just a bucket derives 'bucket' as the stem."""
+    def test_s3_uri_bucket_only(self):
+        """S3 URI with just a bucket and no object key derives 'bucket'."""
         extract = PdfExtract(self.pdf_bytes, config=self.config)
-        name = extract._derive_pdf_name("s3://bucket/", None)
+        name = extract._derive_pdf_name("s3://bucket", None)
         self.assertEqual(name, "bucket")
 
-    def test_s3_uri_no_key_falls_back(self):
-        """S3 URI with no usable stem falls back to hash."""
+    def test_s3_uri_bucket_root_falls_back(self):
+        """S3 URI with just a bucket and trailing slash falls back to hash."""
         extract = PdfExtract(self.pdf_bytes, config=self.config)
-        # PurePosixPath("s3://").stem gives "s3:" which is not empty,
-        # so this is actually a valid (if odd) name. Test the truly
-        # degenerate case where stem would be empty via direct method.
+        name = extract._derive_pdf_name("s3://bucket/", None)
+        # trailing slash means filename portion is empty — falls through to hash
+        self.assertRegex(name, r"^[0-9a-f]{8}\.pdf$")
+
+    def test_s3_uri_no_key_falls_back(self):
+        """S3 URI with no path falls back to hash."""
+        extract = PdfExtract(self.pdf_bytes, config=self.config)
         name = extract._derive_pdf_name("s3://", None)
-        # "s3:" is the stem — not empty, so it's used as-is
-        self.assertEqual(name, "s3:")
+        self.assertRegex(name, r"^[0-9a-f]{8}\.pdf$")
 
 
 class TestPdfNameChildPropagation(unittest.TestCase):

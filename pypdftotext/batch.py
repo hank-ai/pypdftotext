@@ -32,7 +32,10 @@ class PdfExtractBatch:
 
     Args:
         pdfs: List or mapping of PDF inputs (str | Path | bytes | io.BytesIO | PdfReader)
-        config: Configuration to use for all PDFs (defaults to PyPdfToTextConfig())
+        config: a PyPdfToTextConfig instance, a dict of config-field overrides
+            (e.g. ``{"DISABLE_OCR": True}``), or None. A dict is converted to
+            ``PyPdfToTextConfig(overrides=config)`` automatically. Defaults to
+            ``PyPdfToTextConfig()``.
         **kwargs: Additional arguments passed to PdfExtract instances
 
     Usage:
@@ -58,6 +61,11 @@ class PdfExtractBatch:
         self.pdfs = (
             pdfs if isinstance(pdfs, dict) else {f"PDF[{i}]": pdf for i, pdf in enumerate(pdfs)}
         )
+        if kwargs.pop("pdf_name", None) is not None:
+            logger.warning(
+                "pdf_name is not a valid kwarg for PdfExtractBatch, dumbass — "
+                "each PDF's name is derived from its dict key or list index. Ignoring."
+            )
         if isinstance(config, dict):
             config = PyPdfToTextConfig(overrides=config)
         self.config = config or PyPdfToTextConfig()
