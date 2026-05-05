@@ -101,6 +101,18 @@ class TestPyPdfToTextConfig:
         # Invalid field isn't set as attribute
         assert not hasattr(config, "INVALID_FIELD")
 
+    @pytest.mark.unit
+    def test_image_white_point_default(self):
+        """IMAGE_WHITE_POINT defaults to 220."""
+        config = PyPdfToTextConfig(overrides={"INHERIT_CONSTANTS": False})
+        assert config.IMAGE_WHITE_POINT == 220
+
+    @pytest.mark.unit
+    def test_image_white_point_override(self):
+        """IMAGE_WHITE_POINT is overridable via the overrides dict."""
+        config = PyPdfToTextConfig(overrides={"IMAGE_WHITE_POINT": 180})
+        assert config.IMAGE_WHITE_POINT == 180
+
 
 class TestDictConfigShorthand:
     """Test that PdfExtract and PdfExtractBatch accept a dict as the config parameter."""

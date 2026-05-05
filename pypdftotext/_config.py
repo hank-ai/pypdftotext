@@ -47,6 +47,7 @@ class PyPdfToTextConfigOverrides(TypedDict, total=False):
     MAX_HEADER_LINES: int
     MAX_FOOTER_LINES: int
     RETAIN_CONTINUED_HEADINGS: bool
+    IMAGE_WHITE_POINT: int
 
 
 @dataclass(kw_only=True)
@@ -167,6 +168,8 @@ class _ConfigMixIn:
     RETAIN_CONTINUED_HEADINGS: bool = True
     """Set to False to remove '(continued)' section and table headings. Helpful for logical
     parsing operations."""
+    IMAGE_WHITE_POINT: int = 220
+    """The white_point setting for compress_images() calls. Default is 220."""
 
     def __post_init__(self):
         self._initialized_ = True
