@@ -28,6 +28,11 @@ class TestPdfExtract(unittest.TestCase):
         cls.all70th_corrected = cls.samples_dir / "all70th_corrected_rotation.pdf"
         cls.all70th_compressed = cls.samples_dir / "all70th_compressed.pdf"
 
+        # Minimal PDF containing a JBIG2-encoded image — used to exercise the
+        # DependencyError path in compress_images() since JBIG2 decoding requires
+        # the jbig2dec external binary which is typically not installed.
+        cls.jbig2_pdf = cls.samples_dir / "jbig2_image.pdf"
+
         # Ensure sample files exist
         if not cls.deid_epic_pdf.exists():
             raise FileNotFoundError(f"Sample PDF not found: {cls.deid_epic_pdf}")
@@ -556,6 +561,69 @@ class TestPdfExtract(unittest.TestCase):
         # Size might be slightly smaller due to different white_point
         # But should still be compressed
         self.assertLessEqual(recompressed_size, compressed_size)
+
+    def test_compress_images_uses_config_image_white_point(self):
+        """compress_images() falls back to config.IMAGE_WHITE_POINT when white_point=None."""
+        from PIL import Image
+
+        captured_luts = []
+        original_point = Image.Image.point
+
+        def recording_point(self_img, lut, *args, **kwargs):
+            captured_luts.append(lut)
+            return original_point(self_img, lut, *args, **kwargs)
+
+        pdf = PdfExtract(self.all70th_pdf, config={"IMAGE_WHITE_POINT": 180})
+
+        with patch.object(Image.Image, "point", recording_point):
+            pdf.compress_images()
+
+        self.assertGreater(len(captured_luts), 0)
+        for lut in captured_luts:
+            # Below the configured threshold, value passes through unchanged.
+            self.assertEqual(lut(179), 179)
+            # At/above the configured threshold (which is below the 220 default),
+            # the lambda returns 256 — confirming the config value drove the threshold.
+            self.assertEqual(lut(180), 256)
+            self.assertEqual(lut(219), 256)
+
+    def test_compress_images_explicit_white_point_overrides_config(self):
+        """An explicit white_point kwarg supersedes config.IMAGE_WHITE_POINT."""
+        from PIL import Image
+
+        captured_luts = []
+        original_point = Image.Image.point
+
+        def recording_point(self_img, lut, *args, **kwargs):
+            captured_luts.append(lut)
+            return original_point(self_img, lut, *args, **kwargs)
+
+        pdf = PdfExtract(self.all70th_pdf, config={"IMAGE_WHITE_POINT": 100})
+
+        with patch.object(Image.Image, "point", recording_point):
+            pdf.compress_images(white_point=210)
+
+        self.assertGreater(len(captured_luts), 0)
+        for lut in captured_luts:
+            self.assertEqual(lut(209), 209)
+            self.assertEqual(lut(210), 256)
+
+    def test_compress_images_handles_jbig2_dependency_error(self):
+        """compress_images() logs and swallows DependencyError raised by JBIG2 images."""
+        if not self.jbig2_pdf.exists():
+            self.skipTest(f"JBIG2 sample PDF not found: {self.jbig2_pdf}")
+
+        pdf = PdfExtract(self.jbig2_pdf)
+
+        with self.assertLogs("pypdftotext.pdf_extract", level="ERROR") as logs:
+            pdf.compress_images()
+
+        # The error path is taken without raising, and the compressed flag still flips.
+        self.assertTrue(pdf.compressed)
+        self.assertTrue(
+            any("jbig2dec" in msg.lower() for msg in logs.output),
+            f"expected a jbig2dec DependencyError log, got: {logs.output}",
+        )
 
     def test_remove_pages_raises_by_default_when_all_removed(self):
         """remove_pages() raises AllPagesRemovedError when all pages are removed."""
