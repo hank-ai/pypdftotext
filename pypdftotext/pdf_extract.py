@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, overload
 
 from pypdf import PageObject, PdfReader, PdfWriter
+from pypdf.errors import DependencyError
 from pypdf.generic import DictionaryObject, NullObject
 from tqdm import tqdm
 
@@ -635,7 +636,7 @@ class PdfExtract:
 
     def compress_images(
         self,
-        white_point: int = 220,
+        white_point: int | None = None,
         max_overscale: float = 2,
         aspect_tolerance: float = 1e-3,
         force: bool = False,
@@ -648,7 +649,7 @@ class PdfExtract:
         Args:
             white_point: pixel values greater than this are set to white (255) after
                 casting to grey scale. Reduces noise for a sharper image. Values >= 256
-                effectively disable denoising.
+                disable denoising. Default is 220. Override with IMAGE_WHITE_POINT.
             max_overscale: the width of the image must be > max_overscale * page width
                 for downsampling. the scale factor of the downsampled image is set to
                 (max_overscale * page width) / image width.
@@ -660,29 +661,39 @@ class PdfExtract:
         Returns:
             None: images are updated in place in the PDF.
         """
+        white_point = white_point or self.config.IMAGE_WHITE_POINT
         if Image is None or ImageOps is None:
             raise ImportError("PIL not found. Run `pip install pypdftotext[image]`.")
         if self.compressed and not force:
             logger.info("[%s] Images already compressed. No action taken.", self.pdf_name)
             return  # we've already compressed these images
         for ip, page in enumerate(self.writer.pages):
-            for ii, img in enumerate(page.images):
-                if not isinstance(img.image, Image.Image):
-                    logger.debug("Bad image: page index %s image index %s", ip, ii)
-                    continue
-                new_img = img.image.convert("L").point(
-                    lambda x: x if x < white_point else 256  # type: ignore[reportOperatorIssue]
+            try:
+                for ii, img in enumerate(page.images):
+                    if not isinstance(img.image, Image.Image):
+                        logger.debug("Bad image: page index %s image index %s", ip, ii)
+                        continue
+                    new_img = img.image.convert("L").point(
+                        lambda x: x if x < white_point else 256  # type: ignore[reportOperatorIssue]
+                    )
+                    page_aspect = abs(page.mediabox.width / page.mediabox.height)
+                    img_aspect = abs(new_img.width / new_img.height)
+                    if (
+                        new_img.width > max_overscale * page.mediabox.width
+                        and abs(page_aspect - img_aspect) < aspect_tolerance
+                    ):
+                        factor = (max_overscale * page.mediabox.width) / new_img.width
+                        logger.debug(
+                            "Scaling pg idx %s img idx %s with factor=%.2f", ip, ii, factor
+                        )
+                        new_img = ImageOps.scale(
+                            new_img, factor, resample=Image.Resampling.LANCZOS
+                        )
+                    img.replace(new_img, resolution=300)
+            except DependencyError as ex:
+                logger.error(
+                    f"{self.pdf_name}: {ex}", exc_info=logger.getEffectiveLevel() == logging.DEBUG
                 )
-                page_aspect = abs(page.mediabox.width / page.mediabox.height)
-                img_aspect = abs(new_img.width / new_img.height)
-                if (
-                    new_img.width > max_overscale * page.mediabox.width
-                    and abs(page_aspect - img_aspect) < aspect_tolerance
-                ):
-                    factor = (max_overscale * page.mediabox.width) / new_img.width
-                    logger.debug("Scaling pg idx %s img idx %s with factor=%.2f", ip, ii, factor)
-                    new_img = ImageOps.scale(new_img, factor, resample=Image.Resampling.LANCZOS)
-                img.replace(new_img, resolution=300)
         self._regenerate_body()
         self.compressed = True
 
