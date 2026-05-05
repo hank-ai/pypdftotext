@@ -661,7 +661,7 @@ class PdfExtract:
         Returns:
             None: images are updated in place in the PDF.
         """
-        white_point = white_point or self.config.IMAGE_WHITE_POINT
+        white_point = self.config.IMAGE_WHITE_POINT if white_point is None else white_point
         if Image is None or ImageOps is None:
             raise ImportError("PIL not found. Run `pip install pypdftotext[image]`.")
         if self.compressed and not force:
