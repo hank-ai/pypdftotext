@@ -673,6 +673,65 @@ class TestPdfExtract(unittest.TestCase):
         no_smask_pdf = PdfExtract(self.all70th_pdf)
         self.assertFalse(PdfExtract._page_has_smask(no_smask_pdf.reader.pages[0]))
 
+    def test_compress_images_skips_image_masks(self):
+        """compress_images() skips /ImageMask stencils to preserve value overlays.
+
+        The sample is a 1-page form with 1 RGB JPEG underlay and 15 /ImageMask
+        1-bit CCITTFax stencils (typed/handwritten field values painted with the
+        content stream's current fill color). Without the skip, the JPEG
+        recompresses fine but the stencils get rewritten as grayscale rasters,
+        which strips /ImageMask True and the value overlays disappear.
+        """
+        from PIL import Image
+
+        sample = self.samples_dir / "visual_elements_lost_during_image_compression.pdf"
+        if not sample.exists():
+            self.skipTest(f"Sample PDF not found: {sample}")
+
+        point_calls = []
+        original_point = Image.Image.point
+
+        def recording_point(self_img, lut, *args, **kwargs):
+            point_calls.append(self_img.mode)
+            return original_point(self_img, lut, *args, **kwargs)
+
+        pdf = PdfExtract(sample)
+
+        with patch.object(Image.Image, "point", recording_point):
+            with self.assertLogs("pypdftotext.pdf_extract", level="DEBUG") as logs:
+                pdf.compress_images()
+
+        # Exactly 15 DEBUG skip lines (one per /ImageMask XObject) and the JPEG
+        # underlay is the only image that actually reaches the .point() transform.
+        mask_skips = [m for m in logs.output if m.startswith("DEBUG") and "/ImageMask" in m]
+        self.assertEqual(len(mask_skips), 15, f"unexpected skip count: {mask_skips}")
+        self.assertEqual(point_calls, ["L"])
+
+        # Flag flips as usual; subsequent calls short-circuit per the existing contract.
+        self.assertTrue(pdf.compressed)
+
+    def test_is_image_mask_helper(self):
+        """_is_image_mask detects /ImageMask True XObjects via the underlying XObject dict."""
+        sample = self.samples_dir / "visual_elements_lost_during_image_compression.pdf"
+        if not sample.exists():
+            self.skipTest(f"Sample PDF not found: {sample}")
+
+        pdf = PdfExtract(sample)
+        masks = 0
+        non_masks = 0
+        for img in pdf.reader.pages[0].images:
+            if PdfExtract._is_image_mask(img):
+                masks += 1
+            else:
+                non_masks += 1
+        self.assertEqual(masks, 15)
+        self.assertEqual(non_masks, 1)
+
+        # Negative case: all70th.pdf has regular raster images, no /ImageMask stencils.
+        plain_pdf = PdfExtract(self.all70th_pdf)
+        for img in plain_pdf.reader.pages[0].images:
+            self.assertFalse(PdfExtract._is_image_mask(img))
+
     def test_remove_pages_raises_by_default_when_all_removed(self):
         """remove_pages() raises AllPagesRemovedError when all pages are removed."""
         pdf = PdfExtract(self.deid_epic_pdf)
