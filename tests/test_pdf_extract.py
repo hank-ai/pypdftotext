@@ -625,6 +625,54 @@ class TestPdfExtract(unittest.TestCase):
             f"expected a jbig2dec DependencyError log, got: {logs.output}",
         )
 
+    def test_compress_images_skips_pages_with_smask(self):
+        """compress_images() skips whole pages whose XObjects carry an /SMask.
+
+        deid_epic.pdf has 51 soft-masked images on each of its 5 pages. Without
+        the skip, rewriting those image streams while leaving /SMask untouched
+        produces redacted-looking output (see PdfExtract._page_has_smask).
+        """
+        from PIL import Image
+
+        point_calls = []
+        original_point = Image.Image.point
+
+        def recording_point(self_img, lut, *args, **kwargs):
+            point_calls.append(lut)
+            return original_point(self_img, lut, *args, **kwargs)
+
+        pdf = PdfExtract(self.deid_epic_pdf)
+        page_count = len(pdf.extracted_pages)
+        self.assertGreater(page_count, 0)
+
+        with patch.object(Image.Image, "point", recording_point):
+            with self.assertLogs("pypdftotext.pdf_extract", level="WARNING") as logs:
+                pdf.compress_images()
+
+        # Every page is skipped before reaching the per-image processing loop,
+        # so PIL's per-pixel transform must never run.
+        self.assertEqual(len(point_calls), 0)
+
+        # One WARNING per skipped page; each names /SMask and the page index.
+        smask_warnings = [m for m in logs.output if "/SMask" in m]
+        self.assertEqual(len(smask_warnings), page_count)
+        for i in range(page_count):
+            self.assertTrue(
+                any(f"pg_idx={i}" in m for m in smask_warnings),
+                f"missing SMask skip warning for pg_idx={i}: {smask_warnings}",
+            )
+
+        # Flag still flips so subsequent calls short-circuit (matches JBIG2 contract).
+        self.assertTrue(pdf.compressed)
+
+    def test_page_has_smask_detects_xobject_smask(self):
+        """_page_has_smask returns True for pages with /SMask images, False otherwise."""
+        smask_pdf = PdfExtract(self.deid_epic_pdf)
+        self.assertTrue(PdfExtract._page_has_smask(smask_pdf.reader.pages[0]))
+
+        no_smask_pdf = PdfExtract(self.all70th_pdf)
+        self.assertFalse(PdfExtract._page_has_smask(no_smask_pdf.reader.pages[0]))
+
     def test_remove_pages_raises_by_default_when_all_removed(self):
         """remove_pages() raises AllPagesRemovedError when all pages are removed."""
         pdf = PdfExtract(self.deid_epic_pdf)
