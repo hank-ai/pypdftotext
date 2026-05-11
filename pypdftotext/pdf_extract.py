@@ -634,6 +634,25 @@ class PdfExtract:
             self.remove_pages(page_indices, raise_on_empty=raise_on_empty)
         return child_extract
 
+    @staticmethod
+    def _page_has_smask(page: PageObject) -> bool:
+        """Return True if any /XObject referenced by the page has an /SMask entry.
+
+        Used by ``compress_images`` to skip pages where rewriting an image stream
+        would leave its soft mask referencing the old image dimensions/encoding.
+        """
+        rsrcs = page.get_inherited("/Resources", {})
+        if "/XObject" not in rsrcs:
+            return False
+        xobjs = rsrcs["/XObject"]
+        for name in xobjs:
+            obj = xobjs[name]
+            if isinstance(obj, NullObject):
+                continue
+            if "/SMask" in obj and not isinstance(obj["/SMask"], NullObject):
+                return True
+        return False
+
     def compress_images(
         self,
         white_point: int | None = None,
@@ -645,6 +664,11 @@ class PdfExtract:
         Reduces the size of the pdf by converting all images to grey scale and
         downsampling full page images more than 2x larger than the displayed
         area of the PDF.
+
+        Pages whose XObjects reference an /SMask (soft mask) are skipped with a
+        warning: rewriting the image stream via pypdf's ``img.replace`` does not
+        update the associated SMask, and the resulting dimension/encoding
+        mismatch can render previously legible regions as solid black.
 
         Args:
             white_point: pixel values greater than this are set to white (255) after
@@ -668,6 +692,14 @@ class PdfExtract:
             logger.info("[%s] Images already compressed. No action taken.", self.pdf_name)
             return  # we've already compressed these images
         for ip, page in enumerate(self.writer.pages):
+            if self._page_has_smask(page):
+                logger.warning(
+                    "[%s] Skipping image compression on pg_idx=%s: page references an "
+                    "image with /SMask (compressing risks redacted-looking output).",
+                    self.pdf_name,
+                    ip,
+                )
+                continue
             try:
                 for ii, img in enumerate(page.images):
                     if not isinstance(img.image, Image.Image):
