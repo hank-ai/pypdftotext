@@ -167,6 +167,10 @@ These can also be set programmatically after import via the `constants` global s
 - `pdf_name` derivation avoids triggering lazy reader init for bytes/BytesIO inputs for this reason
 - Progress bars support positioning for multi-threaded scenarios via `pbar_position`
 
+### Image Compression Limitations
+
+`PdfExtract.compress_images()` does not preserve the original `/Filter` chain when calling pypdf's `img.replace()` — the replacement is re-serialized via `PIL.Image.save()`'s default encoder (Flate over raw 8-bpp pixels for mode `"L"`). For source images originally encoded with `/DCTDecode` (JPEG), this can roughly double the per-image stream size, since raw grayscale Flate-compresses much worse than JPEG. Re-applying DCT by forwarding `format="JPEG"`-style kwargs through `img.replace()` to `PIL.Image.save()` is feasible but stacks JPEG artifacts on top of the white-point-thresholded grayscale; treat as opt-in (e.g. behind a `prefer_original_filter` flag) if pursued later.
+
 ## Development Guardrails
 
 ### Testing

@@ -653,6 +653,21 @@ class PdfExtract:
                 return True
         return False
 
+    @staticmethod
+    def _is_image_mask(img: object) -> bool:
+        """Return True if the underlying XObject for ``img`` is /ImageMask True.
+
+        PDF Image Masks are 1-bit stencils painted with the content stream's
+        current fill color (typed/handwritten field overlays, signatures, etc.).
+        Recompressing them as grayscale rasters via ``img.replace`` strips
+        ``/ImageMask True`` and the value content disappears or inverts.
+        """
+        ref = getattr(img, "indirect_reference", None)
+        if ref is None:
+            return False
+        xobj = ref.get_object()
+        return bool(xobj.get("/ImageMask"))
+
     def compress_images(
         self,
         white_point: int | None = None,
@@ -669,6 +684,12 @@ class PdfExtract:
         warning: rewriting the image stream via pypdf's ``img.replace`` does not
         update the associated SMask, and the resulting dimension/encoding
         mismatch can render previously legible regions as solid black.
+
+        Individual XObjects flagged ``/ImageMask True`` (1-bit stencils painted
+        with the content stream's current fill color — typed/handwritten field
+        overlays, signatures, etc.) are skipped at the image level with a debug
+        log: recompressing as grayscale strips the ``/ImageMask`` semantics and
+        the value overlay disappears or inverts.
 
         Args:
             white_point: pixel values greater than this are set to white (255) after
@@ -704,6 +725,16 @@ class PdfExtract:
                 for ii, img in enumerate(page.images):
                     if not isinstance(img.image, Image.Image):
                         logger.debug("Bad image: page index %s image index %s", ip, ii)
+                        continue
+                    if self._is_image_mask(img):
+                        logger.debug(
+                            "[%s] Skipping pg_idx=%s img_idx=%s (name=%s): /ImageMask "
+                            "stencil — recompressing would drop the value overlay.",
+                            self.pdf_name,
+                            ip,
+                            ii,
+                            getattr(img, "name", None),
+                        )
                         continue
                     new_img = img.image.convert("L").point(
                         lambda x: x if x < white_point else 256  # type: ignore[reportOperatorIssue]
