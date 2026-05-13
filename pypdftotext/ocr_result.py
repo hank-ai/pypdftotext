@@ -29,8 +29,9 @@ class OCRResult:
             this snapshot rather than from any current global state.
         raw: The underlying AnalyzeResult returned by the Azure SDK; None when
             the operation failed before producing a result.
-        pages: One rendered fixed-width text string per page index submitted,
-            in submission order. Empty when the OCR call failed.
+         pages: One rendered fixed-width text string per page in the order
+             provided by the Azure SDK result (typically increasing
+             ``page_number``). Empty when the OCR call failed.
         error: Human-readable failure description prefixed with ``OCR
             <verb>:`` (e.g. ``"OCR timeout: ..."``). None when the call
             succeeded.
