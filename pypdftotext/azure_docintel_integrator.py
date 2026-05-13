@@ -13,6 +13,7 @@ from azure.core.pipeline.transport import RequestsTransport
 from tqdm import tqdm
 
 from . import layout
+from ._cancellable_polling import CancellablePolling
 from ._config import PyPdfToTextConfig
 
 logger = logging.getLogger(__name__)
@@ -107,6 +108,57 @@ class AzureDocIntelIntegrator:
     def reset(self):
         """Clear last_result from previous run."""
         self.last_result = AnalyzeResult({})
+
+    def submit(
+        self,
+        pdf: bytes,
+        pages: list[int],
+        pdf_name: str = "",
+        *,
+        config: PyPdfToTextConfig | None = None,
+    ) -> AnalyzeDocumentLROPoller | None:
+        """Submit pages for OCR without blocking.
+
+        Returns a poller that can be passed to ``await_one`` (or collected in
+        a dict and passed to ``await_all``) for later result retrieval. Uses
+        ``CancellablePolling`` internally so the eventual wait can be
+        cancelled cleanly on timeout.
+
+        Args:
+            pdf: bytes of the PDF to OCR.
+            pages: 0-based page indices to OCR. Converted to the SDK's
+                1-based ``pages`` string parameter internally.
+            pdf_name: optional identifier for log correlation.
+            config: optional per-call override. Defaults to ``self.config``.
+
+        Returns:
+            A poller, or None when no client could be constructed (missing
+            credentials).
+        """
+        cfg = config or self.config
+        client = client_for(cfg)
+        if client is None:
+            logger.error(
+                "[%s] Cannot submit OCR: no client available "
+                "(check AZURE_DOCINTEL_ENDPOINT and AZURE_DOCINTEL_SUBSCRIPTION_KEY)",
+                pdf_name or "<unnamed>",
+            )
+            return None
+        prefix = f"[{pdf_name}] " if pdf_name else ""
+        logger.info(
+            "%sSubmitting %d pages for OCR (pdf bytes=%d)",
+            prefix,
+            len(pages),
+            len(pdf),
+        )
+        polling = CancellablePolling(client._config.polling_interval)
+        poller = client.begin_analyze_document(
+            model_id=cfg.AZURE_DOCINTEL_MODEL,
+            body=io.BytesIO(pdf),
+            pages=",".join(str(pg + 1) for pg in pages),
+            polling=polling,
+        )
+        return poller
 
     def ocr_pages(self, pdf: bytes, pages: list[int], pdf_name: str = "") -> list[str]:
         """
