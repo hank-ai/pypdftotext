@@ -5,6 +5,7 @@ import logging
 import os
 import threading
 import warnings
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 
 from azure.ai.documentintelligence import AnalyzeDocumentLROPoller, DocumentIntelligenceClient
@@ -67,6 +68,85 @@ def client_for(config: PyPdfToTextConfig) -> DocumentIntelligenceClient | None:
                 config.AZURE_CLIENT_POOL_MAXSIZE,
             )
         return client
+
+
+_BUDGET_GRACE_SECONDS: float = 5.0
+"""How long await_all waits after signalling cancellation for late callbacks
+to fire before synthesizing 'budget exceeded' results. Internal tuning
+constant; not configurable."""
+
+
+def await_all(
+    pollers: "Mapping[str, AnalyzeDocumentLROPoller]",
+    integrator: "AzureDocIntelIntegrator",
+    timeout: float | None,
+    *,
+    config: PyPdfToTextConfig | None = None,
+) -> dict[str, OCRResult]:
+    """Collectively wait for many pollers and return one OCRResult per name.
+
+    Registers a done-callback on each poller. The callback builds an OCRResult
+    via ``integrator.await_one`` (which returns near-instantly because the
+    poller is already done when the callback fires) and records it in a shared
+    dict. Blocks until either all callbacks have fired or the overall
+    ``timeout`` elapses.
+
+    On timeout: sets ``cancel_event`` on every poller whose result is still
+    missing, waits up to ``_BUDGET_GRACE_SECONDS`` for late callbacks
+    (lucky-race window), then synthesizes
+    ``OCRResult(error="OCR batch budget exceeded ...")`` for any still missing.
+
+    Args:
+        pollers: dict mapping pdf_name to poller.
+        integrator: the integrator whose await_one is used inside the
+            callback. Its ``_thread_local`` is updated for the LAST callback
+            to fire (race outcome; matches the "undefined in batch context"
+            semantics for AZURE_READ.last_result).
+        timeout: overall budget in seconds. None means wait indefinitely.
+        config: optional per-batch config override for ``await_one``.
+
+    Returns:
+        dict mapping pdf_name to OCRResult. Never raises.
+    """
+    cfg = config or integrator.config
+    results: dict[str, OCRResult] = {}
+    done_event = threading.Event()
+    lock = threading.Lock()
+    total = len(pollers)
+    if total == 0:
+        return results
+
+    def _on_done(name: str, poller) -> None:
+        result = integrator.await_one(poller, pdf_name=name, config=cfg)
+        with lock:
+            if name not in results:
+                results[name] = result
+                if len(results) == total:
+                    done_event.set()
+
+    for name, poller in pollers.items():
+        # Capture name via default arg to avoid late-binding closure bug.
+        poller.add_done_callback(lambda p, n=name: _on_done(n, p))
+
+    if not done_event.wait(timeout):
+        pending_names = [n for n in pollers if n not in results]
+        for n in pending_names:
+            polling_method = getattr(pollers[n], "_polling_method", None)
+            cancel_event = getattr(polling_method, "cancel_event", None)
+            if cancel_event is not None:
+                cancel_event.set()
+        done_event.wait(_BUDGET_GRACE_SECONDS)
+        with lock:
+            for n in pollers:
+                if n not in results:
+                    results[n] = OCRResult(
+                        pdf_name=n,
+                        config=cfg,
+                        raw=None,
+                        pages=[],
+                        error=(f"OCR batch budget exceeded after {timeout}s (pdf still pending)"),
+                    )
+    return results
 
 
 @dataclass
