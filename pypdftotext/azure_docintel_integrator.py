@@ -12,7 +12,6 @@ from azure.ai.documentintelligence.models import AnalyzeResult, DocumentPage
 from azure.core.credentials import AzureKeyCredential
 from azure.core.exceptions import AzureError, HttpResponseError
 from azure.core.pipeline.transport import RequestsTransport
-from tqdm import tqdm
 
 from . import layout
 from ._cancellable_polling import CancellablePolling
@@ -118,32 +117,18 @@ class AzureDocIntelIntegrator:
         return getattr(self._thread_local, "last_result", AnalyzeResult({}))
 
     def create_client(self) -> bool:
+        """Create or retrieve the cached DocumentIntelligenceClient.
+
+        Returns True if a client is available (newly cached or pre-existing),
+        False otherwise. The actual client object is stored on
+        ``self.client`` for back-compat with any callers that introspect it.
         """
-        Create an Azure DocumentIntelligenceClient based on current global
-        constants and env var settings.
-
-        The following may be set via env var prior to module import OR set via
-        the corresponding self.config.<ENV_VARIABLE_NAME> global constant after
-        module import.
-
-        Constants/Environment Variables:
-            AZURE_DOCINTEL_ENDPOINT: Azure Document Intelligence Instance Endpoint URL.
-            AZURE_DOCINTEL_SUBSCRIPTION_KEY: Azure Document Intelligence Subscription Key.
-
-        Returns:
-            bool: True if client was created successfully. False otherwise.
-        """
-        endpoint = os.getenv("AZURE_DOCINTEL_ENDPOINT") or self.config.AZURE_DOCINTEL_ENDPOINT
-        key = (
-            os.getenv("AZURE_DOCINTEL_SUBSCRIPTION_KEY")
-            or self.config.AZURE_DOCINTEL_SUBSCRIPTION_KEY
-        )
-        if endpoint and key:
-            self.client = DocumentIntelligenceClient(endpoint, AzureKeyCredential(key))
-            logger.info("Azure OCR Client Created: endpoint='%s'", endpoint)
-            return True
-        logger.error("Failed to create Azure OCR Client at endpoint='%s'", endpoint)
-        return False
+        self.client = client_for(self.config)
+        if self.client is None:
+            endpoint = os.getenv("AZURE_DOCINTEL_ENDPOINT") or self.config.AZURE_DOCINTEL_ENDPOINT
+            logger.error("Failed to obtain Azure OCR Client at endpoint='%s'", endpoint)
+            return False
+        return True
 
     def submit(
         self,
@@ -172,7 +157,9 @@ class AzureDocIntelIntegrator:
             credentials).
         """
         cfg = config or self.config
-        client = client_for(cfg)
+        # Prefer the cached/credential-based client; fall back to self.client so
+        # callers that assign a pre-built (or mock) client directly still work.
+        client = client_for(cfg) or self.client
         if client is None:
             logger.error(
                 "[%s] Cannot submit OCR: no client available "
@@ -273,58 +260,27 @@ class AzureDocIntelIntegrator:
             logger.error("%sOCR did not complete: %s", prefix, result.error)
         return result
 
-    def ocr_pages(self, pdf: bytes, pages: list[int], pdf_name: str = "") -> list[str]:
-        """
-        Read the text from supplied pdf page indices.
+    def ocr_pages(
+        self,
+        pdf: bytes,
+        pages: list[int],
+        pdf_name: str = "",
+    ) -> list[str]:
+        """Submit pages for OCR and wait for the result.
 
-        Args:
-            pdf: bytes of a pdf file
-            pages: list of pdf page indices to OCR
-            pdf_name: optional identifier included in log messages for parallel tracing
-
-        Returns:
-            list[str]: list of strings containing structured text extracted
-                from each supplied page index.
+        Thin wrapper over ``submit`` + ``await_one``. Returns the rendered
+        fixed-width page strings, or an empty list on failure (failure is
+        also logged at ERROR; see ``await_one`` for details).
         """
         if self.config.AZURE_DOCINTEL_AUTO_CLIENT and self.client is None:
-            self.create_client()
-        if self.client is None:
-            logger.error(
-                "Azure OCR API not available. Did you create a client? Returning empty list."
-            )
+            # Eager create-and-cache via client_for so the legacy `self.client`
+            # attribute is populated for any external introspection.
+            self.client = client_for(self.config)
+        poller = self.submit(pdf, pages, pdf_name=pdf_name)
+        if poller is None:
             return []
-        assert self.client is not None
-        prefix = f"[{pdf_name}] " if pdf_name else ""
-        logger.info("%sSending pdf of %s bytes for OCR of %s pages.", prefix, len(pdf), len(pages))
-        poller: AnalyzeDocumentLROPoller = self.client.begin_analyze_document(
-            model_id=self.config.AZURE_DOCINTEL_MODEL,
-            body=io.BytesIO(pdf),
-            pages=",".join(str(pg + 1) for pg in pages),
-        )
-        # (Temporary: Task 11 swaps ocr_pages to a thin wrapper around submit+await_one.)
-        self._thread_local.last_result = poller.result(self.config.AZURE_DOCINTEL_TIMEOUT)
-        logger.info(
-            "%s%s pages OCR'd successfully. Creating fixed width pages.", prefix, len(pages)
-        )
-        ocr_pbar = tqdm(
-            self._thread_local.last_result.pages,
-            desc="Processing OCR results...",
-            disable=self.config.DISABLE_PROGRESS_BAR,
-            position=self.config.PROGRESS_BAR_POSITION,
-            leave=None,
-        )
-        results: list[str] = [
-            layout.fixed_width_page(doc_page, self.config) for doc_page in ocr_pbar
-        ]
-        # Populate ocr_result so deprecated wrappers (handwritten_ratio, rotation_degrees,
-        # page_at_index) can delegate to OCRResult instead of reading last_result directly.
-        self._thread_local.ocr_result = OCRResult(
-            pdf_name=pdf_name,
-            config=self.config,
-            raw=self._thread_local.last_result,
-            pages=results,
-        )
-        return results
+        result = self.await_one(poller, pdf_name=pdf_name)
+        return result.pages
 
     def handwritten_ratio(
         self,
