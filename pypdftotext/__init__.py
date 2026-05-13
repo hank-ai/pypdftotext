@@ -1,6 +1,6 @@
 """Extract text from pdf pages from codebehind or Azure OCR as required"""
 
-__version__ = "0.3.8"
+__version__ = "0.4.0"
 
 import io
 import logging
@@ -13,6 +13,7 @@ from ._config import PyPdfToTextConfig, PyPdfToTextConfigOverrides, constants
 from .azure_docintel_integrator import AZURE_READ
 from .batch import PdfExtractBatch
 from .extracted_page import ExtractedPage
+from .ocr_result import OCRResult
 from .pdf_extract import AllPagesRemovedError, PdfExtract
 
 logger = logging.getLogger(__name__)
@@ -105,6 +106,7 @@ __all__ = [
     "pdf_text_pages",
     "pdf_text_page_lines",
     "ExtractedPage",
+    "OCRResult",
     "PyPdfToTextConfig",
     "PyPdfToTextConfigOverrides",
     "AllPagesRemovedError",

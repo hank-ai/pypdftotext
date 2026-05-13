@@ -22,19 +22,21 @@ class ExtractedPage:
 
     Attributes:
         page_obj: The pypdf PageObject instance for this page.
-        handwritten_ratio: Ratio of handwritten to total characters (0.0 to 1.0).
+        handwritten_ratio: Ratio of handwritten to total characters (0.0 to 1.0). \
             Always 0.0 for embedded text pages.
         text: The extracted text content from the page. Excludes header and footer.
-        source: Indicates whether text was extracted from embedded PDF content
+        source: Indicates whether text was extracted from embedded PDF content \
             ("embedded") or via OCR ("OCR").
         azure_page: The Azure DocumentPage instance if this page was OCR'd,
             None for embedded text pages.
-        document_idx: An integer representing the ancestry of the page. Pages
-            with a common document_idx likely originated from the same source.
-            Used for header/footer detection. Default is 0. Calling the
+        document_idx: An integer representing the ancestry of the page. Pages \
+            with a common document_idx likely originated from the same source. \
+            Used for header/footer detection. Default is 0. Calling the \
             PdfExtract().assign_document_indices() will dynamically set this value.
         header: Text detected as a header on this page.
         footer: Text detected as a footer on this page.
+        ocr_error: Failure reason set when OCR was attempted and failed. None \
+            when OCR succeeded or was never attempted.
     """
 
     page_obj: PageObject
@@ -45,6 +47,7 @@ class ExtractedPage:
     document_idx: int = 0
     header: str = ""
     footer: str = ""
+    ocr_error: str | None = None
 
     @cached_property
     def fingerprint(self):

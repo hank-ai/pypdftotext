@@ -348,10 +348,8 @@ class TestPdfExtract(unittest.TestCase):
             azure_integrator = AzureDocIntelIntegrator(config=config)
             azure_integrator.client = mock_client
 
-            # Patch the PdfExtract to use our configured integrator
-            with patch("pypdftotext.pdf_extract.AzureDocIntelIntegrator") as MockAzureClass:
-                MockAzureClass.return_value = azure_integrator
-
+            # Patch AZURE_READ so _extract_pages uses our configured integrator
+            with patch("pypdftotext.pdf_extract.AZURE_READ", azure_integrator):
                 # Create PdfExtract which will use our mocked client
                 pdf = PdfExtract(self.all70th_pdf, config=config)
 
@@ -461,10 +459,8 @@ class TestPdfExtract(unittest.TestCase):
             azure_integrator = AzureDocIntelIntegrator(config=config)
             azure_integrator.client = mock_client
 
-            # Patch the PdfExtract to use our configured integrator
-            with patch("pypdftotext.pdf_extract.AzureDocIntelIntegrator") as MockAzureClass:
-                MockAzureClass.return_value = azure_integrator
-
+            # Patch AZURE_READ so _extract_pages uses our configured integrator
+            with patch("pypdftotext.pdf_extract.AZURE_READ", azure_integrator):
                 # Create PdfExtract
                 pdf = PdfExtract(self.all70th_pdf, config=config)
 
@@ -812,6 +808,238 @@ class TestPdfExtract(unittest.TestCase):
         pdf.remove_pages(remove=[0])  # remove just one page
 
         self.assertEqual(len(pdf.extracted_pages), original_count - 1)
+
+
+class TestExtractedPageOcrError(unittest.TestCase):
+    def test_ocr_error_defaults_to_none(self):
+        """ExtractedPage.ocr_error is None by default."""
+        from unittest.mock import MagicMock
+        from pypdftotext.extracted_page import ExtractedPage
+        # Use any page from any sample PDF; we don't need OCR to test the field.
+        # Construct a minimal mock PageObject via MagicMock.
+        page = ExtractedPage(page_obj=MagicMock(), handwritten_ratio=0.0, text="hello")
+        self.assertIsNone(page.ocr_error)
+
+    def test_ocr_error_can_be_set(self):
+        """ExtractedPage.ocr_error accepts string assignment."""
+        from unittest.mock import MagicMock
+        from pypdftotext.extracted_page import ExtractedPage
+        page = ExtractedPage(page_obj=MagicMock(), handwritten_ratio=0.0, text="")
+        page.ocr_error = "OCR timeout: simulated"
+        self.assertEqual(page.ocr_error, "OCR timeout: simulated")
+
+
+class TestOCRResult(unittest.TestCase):
+    def _fake_analyze_result_dict(self, num_pages=2):
+        """Build a minimal dict suitable for AnalyzeResult.__init__."""
+        return {
+            "apiVersion": "2024-11-30",
+            "modelId": "prebuilt-read",
+            "stringIndexType": "textElements",
+            "content": "page1 text\npage2 text",
+            "pages": [
+                {"pageNumber": i + 1, "angle": 0.0, "width": 8.5, "height": 11.0,
+                 "unit": "inch", "spans": [{"offset": i * 11, "length": 10}],
+                 "words": [], "lines": [], "selectionMarks": []}
+                for i in range(num_pages)
+            ],
+            "styles": [],
+        }
+
+    def test_succeeded_true_when_raw_has_pages_and_no_error(self):
+        from azure.ai.documentintelligence.models import AnalyzeResult
+        from pypdftotext import PyPdfToTextConfig
+        from pypdftotext.ocr_result import OCRResult
+        raw = AnalyzeResult(self._fake_analyze_result_dict(num_pages=1))
+        result = OCRResult(
+            pdf_name="x.pdf",
+            config=PyPdfToTextConfig(),
+            raw=raw,
+            pages=["page1 text"],
+        )
+        self.assertTrue(result.succeeded)
+        self.assertIsNone(result.error)
+
+    def test_succeeded_false_when_error_set(self):
+        from pypdftotext import PyPdfToTextConfig
+        from pypdftotext.ocr_result import OCRResult
+        result = OCRResult(
+            pdf_name="x.pdf",
+            config=PyPdfToTextConfig(),
+            raw=None,
+            pages=[],
+            error="OCR timeout: simulated",
+        )
+        self.assertFalse(result.succeeded)
+
+    def test_succeeded_false_when_raw_none(self):
+        from pypdftotext import PyPdfToTextConfig
+        from pypdftotext.ocr_result import OCRResult
+        result = OCRResult(pdf_name="x.pdf", config=PyPdfToTextConfig(), raw=None, pages=[])
+        self.assertFalse(result.succeeded)
+
+    def test_page_at_index_returns_page_when_present(self):
+        from azure.ai.documentintelligence.models import AnalyzeResult
+        from pypdftotext import PyPdfToTextConfig
+        from pypdftotext.ocr_result import OCRResult
+        raw = AnalyzeResult(self._fake_analyze_result_dict(num_pages=2))
+        result = OCRResult(
+            pdf_name="x.pdf", config=PyPdfToTextConfig(), raw=raw, pages=["a", "b"],
+        )
+        page = result.page_at_index(0)
+        self.assertIsNotNone(page)
+        self.assertEqual(page.page_number, 1)
+        page2 = result.page_at_index(1)
+        self.assertEqual(page2.page_number, 2)
+
+    def test_page_at_index_returns_none_when_missing(self):
+        from azure.ai.documentintelligence.models import AnalyzeResult
+        from pypdftotext import PyPdfToTextConfig
+        from pypdftotext.ocr_result import OCRResult
+        raw = AnalyzeResult(self._fake_analyze_result_dict(num_pages=1))
+        result = OCRResult(
+            pdf_name="x.pdf", config=PyPdfToTextConfig(), raw=raw, pages=["a"],
+        )
+        self.assertIsNone(result.page_at_index(99))
+
+    def test_rotation_degrees_zero_when_page_missing(self):
+        from pypdftotext import PyPdfToTextConfig
+        from pypdftotext.ocr_result import OCRResult
+        result = OCRResult(pdf_name="x.pdf", config=PyPdfToTextConfig(), raw=None, pages=[])
+        self.assertEqual(result.rotation_degrees(0), 0.0)
+
+    def test_handwritten_ratio_zero_when_no_styles(self):
+        from azure.ai.documentintelligence.models import AnalyzeResult
+        from pypdftotext import PyPdfToTextConfig
+        from pypdftotext.ocr_result import OCRResult
+        raw = AnalyzeResult(self._fake_analyze_result_dict(num_pages=1))
+        result = OCRResult(
+            pdf_name="x.pdf", config=PyPdfToTextConfig(), raw=raw, pages=["a"],
+        )
+        self.assertEqual(result.handwritten_ratio(0), 0.0)
+
+    def test_ocr_result_publicly_importable(self):
+        """OCRResult is importable from the top-level package."""
+        import pypdftotext
+        self.assertTrue(hasattr(pypdftotext, "OCRResult"))
+        from pypdftotext.ocr_result import OCRResult as _Direct
+        self.assertIs(pypdftotext.OCRResult, _Direct)
+        self.assertIn("OCRResult", pypdftotext.__all__)
+
+
+class TestOcrEndToEnd(unittest.TestCase):
+    """Coverage-based: success, timeout, azure-error variants of PdfExtract.ocr."""
+
+    def setUp(self):
+        from pathlib import Path
+        self.samples_dir = Path("samples")
+        self.pdf_path = self.samples_dir / "all70th.pdf"
+        if not self.pdf_path.exists():
+            self.skipTest("Sample PDF not available")
+        self.cfg = PyPdfToTextConfig(overrides={
+            "DISABLE_OCR": False,
+            "MIN_LINES_OCR_TRIGGER": 1,
+            "TRIGGER_OCR_PAGE_RATIO": 0.5,
+            "DISABLE_PROGRESS_BAR": True,
+            "MAX_CHARS_PER_PDF_PAGE": 25000,
+            "AZURE_DOCINTEL_ENDPOINT": "https://x.example",
+            "AZURE_DOCINTEL_SUBSCRIPTION_KEY": "key",
+        })
+
+    def _build_success_ocr_result(self, extract):
+        """Build a synthetic successful OCRResult for the pages extract needs."""
+        from pypdftotext.ocr_result import OCRResult
+        from azure.ai.documentintelligence.models import AnalyzeResult
+        ocr_idxs = extract.ocr_page_idxs
+        raw = AnalyzeResult({
+            "apiVersion": "2024-11-30", "modelId": "prebuilt-read",
+            "stringIndexType": "textElements",
+            "content": " ".join(f"page{i}" for i in ocr_idxs),
+            "pages": [
+                {"pageNumber": i + 1, "angle": 0.0, "width": 8.5,
+                 "height": 11.0, "unit": "inch",
+                 "spans": [{"offset": idx_pos * 6, "length": 5}],
+                 "words": [], "lines": [], "selectionMarks": []}
+                for idx_pos, i in enumerate(ocr_idxs)
+            ],
+            "styles": [],
+        })
+        pages = [f"OCR_PAGE_{i}" for i in ocr_idxs]
+        return OCRResult(
+            pdf_name=extract.pdf_name, config=extract.config,
+            raw=raw, pages=pages,
+        )
+
+    def test_ocr_end_to_end_success(self):
+        """Mocked azure produces a successful OCRResult; ExtractedPages reflect it."""
+        from pypdftotext.pdf_extract import PdfExtract
+        from unittest.mock import patch, MagicMock
+        # Force OCR by suppressing embedded text on every page.
+        cfg = PyPdfToTextConfig(base=self.cfg, overrides={"SUPPRESS_EMBEDDED_TEXT": True})
+        extract = PdfExtract(self.pdf_path.read_bytes(), config=cfg, pdf_name="t.pdf")
+        # Trigger _extract_pages so ocr_page_idxs is populated, but don't run ocr() yet.
+        extract._extracted_pages = None
+        mock_azure = MagicMock(name="mock_azure")
+        mock_azure.submit.return_value = MagicMock(name="poller")
+        mock_azure.await_one.side_effect = lambda p, **kw: self._build_success_ocr_result(extract)
+        with patch("pypdftotext.pdf_extract.AZURE_READ", mock_azure):
+            _ = extract.extracted_pages
+        self.assertIsNotNone(extract.ocr_result)
+        self.assertTrue(extract.ocr_result.succeeded)
+        # Every page that was OCR'd has source="OCR" and non-empty text.
+        for idx in extract.ocr_page_idxs:
+            self.assertEqual(extract.extracted_pages[idx].source, "OCR")
+            self.assertTrue(extract.extracted_pages[idx].text.startswith("OCR_PAGE_"))
+            self.assertIsNone(extract.extracted_pages[idx].ocr_error)
+
+    def test_ocr_end_to_end_failure_sets_ocr_error(self):
+        """Mocked azure returns OCRResult with error; ExtractedPages get ocr_error."""
+        from pypdftotext.pdf_extract import PdfExtract
+        from pypdftotext.ocr_result import OCRResult
+        from unittest.mock import patch, MagicMock
+        cfg = PyPdfToTextConfig(base=self.cfg, overrides={"SUPPRESS_EMBEDDED_TEXT": True})
+        extract = PdfExtract(self.pdf_path.read_bytes(), config=cfg, pdf_name="t.pdf")
+        extract._extracted_pages = None
+        failure = OCRResult(
+            pdf_name="t.pdf", config=cfg, raw=None, pages=[],
+            error="OCR timeout: simulated for test",
+        )
+        mock_azure = MagicMock(name="mock_azure")
+        mock_azure.submit.return_value = MagicMock(name="poller")
+        mock_azure.await_one.return_value = failure
+        with patch("pypdftotext.pdf_extract.AZURE_READ", mock_azure):
+            _ = extract.extracted_pages
+        self.assertIsNotNone(extract.ocr_result)
+        self.assertFalse(extract.ocr_result.succeeded)
+        for idx in extract.ocr_page_idxs:
+            self.assertEqual(
+                extract.extracted_pages[idx].ocr_error, "OCR timeout: simulated for test",
+            )
+            self.assertEqual(extract.extracted_pages[idx].text, "")
+            self.assertEqual(extract.extracted_pages[idx].source, "embedded")
+
+    def test_ocr_logs_no_false_success_on_failure(self):
+        """The misleading 'OCR'd successfully' log must not fire on failure."""
+        from pypdftotext.pdf_extract import PdfExtract
+        from pypdftotext.ocr_result import OCRResult
+        from unittest.mock import patch, MagicMock
+        cfg = PyPdfToTextConfig(base=self.cfg, overrides={"SUPPRESS_EMBEDDED_TEXT": True})
+        extract = PdfExtract(self.pdf_path.read_bytes(), config=cfg, pdf_name="t.pdf")
+        extract._extracted_pages = None
+        failure = OCRResult(
+            pdf_name="t.pdf", config=cfg, raw=None, pages=[],
+            error="OCR failed: HttpResponseError: simulated",
+        )
+        mock_azure = MagicMock(name="mock_azure")
+        mock_azure.submit.return_value = MagicMock(name="poller")
+        mock_azure.await_one.return_value = failure
+        with patch("pypdftotext.pdf_extract.AZURE_READ", mock_azure):
+            with self.assertLogs("pypdftotext", level="INFO") as captured:
+                # Trigger the OCR path.
+                _ = extract.extracted_pages
+        # Assert no "successfully" log emitted at INFO.
+        success_lines = [line for line in captured.output if "successfully" in line.lower()]
+        self.assertEqual(success_lines, [])
 
 
 if __name__ == "__main__":

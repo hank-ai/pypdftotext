@@ -8,13 +8,13 @@ from collections.abc import Mapping, Sequence
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-from azure.core.exceptions import AzureError
 from pypdf import PdfReader
 from tqdm import tqdm
 
 from ._config import PyPdfToTextConfig, PyPdfToTextConfigOverrides
-from .azure_docintel_integrator import AzureDocIntelIntegrator
+from .azure_docintel_integrator import AZURE_READ, await_all
 from .header_footer_detection import assign_headers_and_footers
+from .ocr_result import OCRResult
 from .pdf_extract import PdfExtract
 
 logger = logging.getLogger(__name__)
@@ -178,9 +178,8 @@ class PdfExtractBatch:
         return self.pdf_extracts
 
     def _perform_batch_ocr(self) -> dict[str, PdfExtract]:
-        """Perform OCR for all collected pages in parallel."""
-
-        ocr_pdfs = {  # get pdfs that need OCR
+        """Submit all OCR-eligible PDFs, await collectively, apply results."""
+        ocr_pdfs = {
             pdf_name: extract
             for pdf_name, extract in self.pdf_extracts.items()
             if (
@@ -196,55 +195,51 @@ class PdfExtractBatch:
             )
             return self.pdf_extracts
         total_pages = sum(len(ext.ocr_page_idxs) for ext in ocr_pdfs.values())
-        logger.info("Submitting %s pages across %s PDFs for batch OCR", total_pages, len(ocr_pdfs))
-
-        # Process PDFs in parallel using ThreadPoolExecutor
-        with ThreadPoolExecutor(
-            max_workers=min(len(ocr_pdfs), self.config.MAX_WORKERS)
-        ) as executor:
-            futures: list[Future[tuple[str, PdfExtract]]] = []
-            for pdf_name, pdf_ext in ocr_pdfs.items():
-                futures.append(executor.submit(self._ocr_single_pdf, (pdf_name, pdf_ext)))
-
-            # Process results as they complete
-            pbar = tqdm(
-                as_completed(futures),
-                total=len(futures),
-                desc="Processing OCR results",
-                disable=self.config.DISABLE_PROGRESS_BAR,
-                position=self.config.PROGRESS_BAR_POSITION,
-                leave=None,
+        logger.info(
+            "Submitting %s pages across %s PDFs for batch OCR",
+            total_pages,
+            len(ocr_pdfs),
+        )
+        # Phase 1: submit all
+        pollers = {}
+        for pdf_name, extract in ocr_pdfs.items():
+            poller = AZURE_READ.submit(
+                extract.body,
+                extract.ocr_page_idxs,
+                pdf_name=pdf_name,
+                config=self.config,
             )
-
-            for i, future in enumerate(pbar):
-                pdf_name, _ = future.result()
-                logger.debug("OCR complete for %s (%s/%s)", pdf_name, i, len(ocr_pdfs))
+            if poller is not None:
+                pollers[pdf_name] = poller
+            else:
+                # No client available; record failure inline.
+                extract._apply_ocr_result(
+                    OCRResult(
+                        pdf_name=pdf_name,
+                        config=self.config,
+                        raw=None,
+                        pages=[],
+                        error="OCR failed: no client available "
+                        "(check AZURE_DOCINTEL_ENDPOINT and AZURE_DOCINTEL_SUBSCRIPTION_KEY)",
+                    )
+                )
+        # Phase 2: collective wait
+        results = await_all(
+            pollers,
+            AZURE_READ,
+            timeout=self.config.AZURE_DOCINTEL_TIMEOUT,
+            config=self.config,
+        )
+        # Phase 3: apply
+        for pdf_name, extract in ocr_pdfs.items():
+            if pdf_name in results:
+                try:
+                    extract._apply_ocr_result(results[pdf_name])
+                except Exception as e:  # noqa: BLE001  # batch survives per-PDF apply failures
+                    logger.error(
+                        "PdfExtractBatch apply error for %s: %s",
+                        pdf_name,
+                        e,
+                        exc_info=logger.getEffectiveLevel() == logging.DEBUG,
+                    )
         return self.pdf_extracts
-
-    def _ocr_single_pdf(self, pdf_info: tuple[str, PdfExtract]) -> tuple[str, PdfExtract]:
-        """OCR a single PDF's pages."""
-        pdf_name, pdf_extract = pdf_info
-        try:
-            logger.debug("Begin OCR for %s", pdf_name)
-            azure = AzureDocIntelIntegrator(self.config)
-            if self.config.AZURE_DOCINTEL_AUTO_CLIENT and azure.client is None:
-                azure.create_client()
-
-            # Run OCR for this extract.
-            pdf_extract.ocr(azure)
-        except AzureError as azure_error:
-            logger.error(
-                "PdfExtractBatch Azure Error for %s: %s",
-                pdf_name,
-                azure_error,
-                exc_info=logger.getEffectiveLevel() == logging.DEBUG,
-            )
-        except Exception as e:  # noqa: BLE001  # batch must survive per-PDF OCR failures; AzureError caught above
-            logger.error(
-                "PdfExtractBatch Error for %s: %s",
-                pdf_name,
-                e,
-                exc_info=logger.getEffectiveLevel() == logging.DEBUG,
-            )
-
-        return pdf_name, pdf_extract
