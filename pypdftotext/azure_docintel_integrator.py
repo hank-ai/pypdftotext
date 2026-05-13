@@ -3,17 +3,67 @@
 import io
 import logging
 import os
+import threading
 from dataclasses import dataclass, field
 
 from azure.ai.documentintelligence import AnalyzeDocumentLROPoller, DocumentIntelligenceClient
 from azure.ai.documentintelligence.models import AnalyzeResult, DocumentPage
 from azure.core.credentials import AzureKeyCredential
+from azure.core.pipeline.transport import RequestsTransport
 from tqdm import tqdm
 
 from . import layout
 from ._config import PyPdfToTextConfig
 
 logger = logging.getLogger(__name__)
+
+_client_cache: dict[tuple[str, str], DocumentIntelligenceClient] = {}
+"""Process-wide cache of DocumentIntelligenceClient instances keyed by
+(endpoint, key). Allows credential rotation between calls without leaking
+stale clients."""
+
+_client_cache_lock: threading.Lock = threading.Lock()
+"""Protects _client_cache against concurrent first-construction."""
+
+
+def client_for(config: PyPdfToTextConfig) -> DocumentIntelligenceClient | None:
+    """Return a DocumentIntelligenceClient for the given config's credentials.
+
+    Clients are cached by (endpoint, key) tuple, so rotating credentials
+    transparently produces a new client. The underlying urllib3 connection
+    pool size is taken from ``config.AZURE_CLIENT_POOL_MAXSIZE``.
+
+    Environment variables ``AZURE_DOCINTEL_ENDPOINT`` and
+    ``AZURE_DOCINTEL_SUBSCRIPTION_KEY`` take precedence over config fields,
+    matching the existing behavior of ``AzureDocIntelIntegrator.create_client``.
+
+    Returns:
+        A cached or newly-constructed client, or None if either endpoint or
+        key is missing.
+    """
+    endpoint = os.getenv("AZURE_DOCINTEL_ENDPOINT") or config.AZURE_DOCINTEL_ENDPOINT
+    key = os.getenv("AZURE_DOCINTEL_SUBSCRIPTION_KEY") or config.AZURE_DOCINTEL_SUBSCRIPTION_KEY
+    if not endpoint or not key:
+        return None
+    cache_key = (endpoint, key)
+    with _client_cache_lock:
+        client = _client_cache.get(cache_key)
+        if client is None:
+            transport = RequestsTransport(
+                connection_pool_maxsize=config.AZURE_CLIENT_POOL_MAXSIZE,
+            )
+            client = DocumentIntelligenceClient(
+                endpoint,
+                AzureKeyCredential(key),
+                transport=transport,
+            )
+            _client_cache[cache_key] = client
+            logger.info(
+                "Cached new Azure OCR client: endpoint='%s', pool_maxsize=%s",
+                endpoint,
+                config.AZURE_CLIENT_POOL_MAXSIZE,
+            )
+        return client
 
 
 @dataclass
