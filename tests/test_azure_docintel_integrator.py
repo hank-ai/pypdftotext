@@ -262,6 +262,97 @@ class TestDeprecatedSurface(unittest.TestCase):
         self.assertIsInstance(value, AnalyzeResult)
         self.assertIsNone(value.pages)  # AnalyzeResult({}).pages is None.
 
+    def test_handwritten_ratio_back_compat(self):
+        """Deprecated wrapper returns the same value as OCRResult.handwritten_ratio."""
+        integrator = AzureDocIntelIntegrator(self.cfg)
+        result, _ = self._run_one_ocr(integrator)
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            integrator_value = integrator.handwritten_ratio(0)
+        # Warning emitted.
+        self.assertEqual(len(caught), 1)
+        self.assertEqual(caught[0].category, DeprecationWarning)
+        # Value matches OCRResult.
+        self.assertEqual(integrator_value, result.handwritten_ratio(0))
+
+    def test_rotation_degrees_back_compat(self):
+        integrator = AzureDocIntelIntegrator(self.cfg)
+        result, _ = self._run_one_ocr(integrator)
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            self.assertEqual(integrator.rotation_degrees(0), result.rotation_degrees(0))
+        self.assertEqual(caught[0].category, DeprecationWarning)
+
+    def test_page_at_index_back_compat(self):
+        integrator = AzureDocIntelIntegrator(self.cfg)
+        result, _ = self._run_one_ocr(integrator)
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            self.assertIs(integrator.page_at_index(0), result.page_at_index(0))
+        self.assertEqual(caught[0].category, DeprecationWarning)
+
+    def test_reset_clears_thread_local_with_warning(self):
+        from azure.ai.documentintelligence.models import AnalyzeResult
+        integrator = AzureDocIntelIntegrator(self.cfg)
+        self._run_one_ocr(integrator)
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            integrator.reset()
+        self.assertEqual(caught[0].category, DeprecationWarning)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)
+            self.assertIsNone(integrator.last_result.pages)  # back to empty sentinel
+
+
+class TestThreadLocalIsolation(unittest.TestCase):
+    def setUp(self):
+        with _client_cache_lock:
+            _client_cache.clear()
+
+    def test_thread_local_isolation_across_threads(self):
+        """REGRESSION (P4): two threads sharing one integrator each see their
+        own most-recent OCR result, not each other's."""
+        from azure.ai.documentintelligence.models import AnalyzeResult
+
+        def make_raw(label):
+            return AnalyzeResult({
+                "apiVersion": "2024-11-30", "modelId": "prebuilt-read",
+                "stringIndexType": "textElements", "content": label,
+                "pages": [{"pageNumber": 1, "angle": 0.0, "width": 8.5,
+                           "height": 11.0, "unit": "inch",
+                           "spans": [{"offset": 0, "length": len(label)}],
+                           "words": [], "lines": [], "selectionMarks": []}],
+                "styles": [],
+            })
+
+        cfg = PyPdfToTextConfig(overrides={
+            "AZURE_DOCINTEL_ENDPOINT": "https://x.example",
+            "AZURE_DOCINTEL_SUBSCRIPTION_KEY": "key",
+        })
+        integrator = AzureDocIntelIntegrator(cfg)
+        results = {}
+
+        def worker(label):
+            poller = MagicMock()
+            poller.result.return_value = make_raw(label)
+            integrator.await_one(poller, pdf_name=label)
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", DeprecationWarning)
+                results[label] = integrator.last_result.content
+
+        threads = [
+            threading.Thread(target=worker, args=("alpha",)),
+            threading.Thread(target=worker, args=("bravo",)),
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        # Each thread saw its own label, not the other's.
+        self.assertEqual(results["alpha"], "alpha")
+        self.assertEqual(results["bravo"], "bravo")
+
 
 if __name__ == "__main__":
     unittest.main()

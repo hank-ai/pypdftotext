@@ -85,8 +85,20 @@ class AzureDocIntelIntegrator:
     )
 
     def reset(self):
-        """Clear last_result from previous run."""
+        """DEPRECATED. Clear the thread-local last_result.
+
+        Replaced by allowing OCRResult instances to manage their own
+        lifetime; no explicit reset is needed in the new API.
+        """
+        warnings.warn(
+            "AzureDocIntelIntegrator.reset is deprecated; OCRResult instances "
+            "manage their own lifetime. This call clears the thread-local "
+            "back-compat slot.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         self._thread_local.last_result = AnalyzeResult({})
+        self._thread_local.ocr_result = None
 
     @property
     def last_result(self) -> AnalyzeResult:
@@ -304,6 +316,14 @@ class AzureDocIntelIntegrator:
         results: list[str] = [
             layout.fixed_width_page(doc_page, self.config) for doc_page in ocr_pbar
         ]
+        # Populate ocr_result so deprecated wrappers (handwritten_ratio, rotation_degrees,
+        # page_at_index) can delegate to OCRResult instead of reading last_result directly.
+        self._thread_local.ocr_result = OCRResult(
+            pdf_name=pdf_name,
+            config=self.config,
+            raw=self._thread_local.last_result,
+            pages=results,
+        )
         return results
 
     def handwritten_ratio(
@@ -311,115 +331,53 @@ class AzureDocIntelIntegrator:
         page_index: int,
         handwritten_confidence_limit: float | None = None,
     ) -> float:
-        """
-        Given a page *index*, returns the ratio of handwritten to total characters on the page.
+        """DEPRECATED. Returns the handwritten ratio for the given page from
+        this thread's most-recent OCR result.
 
-        Args:
-            page_index: the 0-based index of the page to analyze
-            handwritten_confidence_limit: deprecated. use config.OCR_HANDWRITTEN_CONFIDENCE_LIMIT
-
-        Returns:
-            float: 0.0 if the supplied page index was not OCR'd or has no text. Otherwise
-            the ratio of the sum of all handwritten spans on the page to the total page span.
+        Replaced by ``OCRResult.handwritten_ratio(page_index)`` (or
+        ``PdfExtract.ocr_result.handwritten_ratio(page_index)``).
         """
+        warnings.warn(
+            "AzureDocIntelIntegrator.handwritten_ratio is deprecated. Use "
+            "OCRResult.handwritten_ratio (e.g. via PdfExtract.ocr_result) "
+            "instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         if handwritten_confidence_limit is not None:
             logger.warning(
-                "Arg 'handwritten_confidence_limit' is no longer supported."
-                " Supply the desired value via `self.config.OCR_HANDWRITTEN_CONFIDENCE_LIMIT`."
-                "\nrequested limit: %.2f (from arg)"
-                "\neffective limit: %.2f (from self.config)",
+                "handwritten_confidence_limit arg is no longer supported; "
+                "set config.OCR_HANDWRITTEN_CONFIDENCE_LIMIT instead. "
+                "(requested=%.2f, effective=%.2f)",
                 handwritten_confidence_limit,
                 self.config.OCR_HANDWRITTEN_CONFIDENCE_LIMIT,
             )
-
-        if _selected_page := self.page_at_index(page_index):
-            # a page should only have one span, but we'll treat as if there could be more
-            # just in case. Get the min offset from all spans as the start and the max
-            # offset + length as the page end.
-            page_start = min(span.offset for span in _selected_page.spans)
-            page_end = max(span.offset + span.length for span in _selected_page.spans)
-            # Now we'll account for selection marks since prebuilt-layout output replaces
-            # checkboxes and the like with ':selected:' or ':unselected:' and includes this
-            # unrendered text in span offsets (like an asshole).
-            page_length_reduction = sum(
-                sel.span.length for sel in _selected_page.selection_marks or []
-            )
-            # finally, we'll ignore newline chars that occur in the page span
-            page_length_reduction += self._thread_local.last_result.content[
-                page_start:page_end
-            ].count("\n")
-            page_length = page_end - page_start - page_length_reduction
-            if page_length <= 0:
-                # whoops! something's wrong. We should probably throw an exception here, but
-                # we'll fail open for now as it fits our use case.
-                logger.warning(
-                    "Error calculating handwritten ratio for page at index %s:"
-                    " page span length reduction (%s) + start (%s) >= end (%s)",
-                    page_index,
-                    page_length_reduction,
-                    page_start,
-                    page_end,
-                )
-                return 0.0
-            # lets get the sum of span lengths for all is_handwritten styles with confidences
-            # >= our threshold that also occur between page_start and page_end!
-            handwritten_length = sum(
-                (
-                    (span.offset + min(span.length, page_end)) - span.offset
-                    for style in (self._thread_local.last_result.styles or [])
-                    if style.is_handwritten
-                    and style.confidence >= self.config.OCR_HANDWRITTEN_CONFIDENCE_LIMIT
-                    for span in style.spans
-                    if page_start <= span.offset < page_end
-                ),
-                start=0,
-            )
-            # Guess we'll cap our value at 1.0. We should probably throw and exception here
-            # also, but again we'll fail open for now as it suits our use case.
-            ratio = handwritten_length / page_length
-            if ratio > 1.0:
-                logger.warning("Handwritten ratio of page index at %s capped at 1.0", page_index)
-                return 1.0
-            return ratio
-        # page was not OCR'd return 0.0 default.
-        return 0.0
+        result = getattr(self._thread_local, "ocr_result", None)
+        return result.handwritten_ratio(page_index) if result is not None else 0.0
 
     def rotation_degrees(self, page_index: int) -> float:
-        """
-        Given a page *index*, returns the degrees of rotation of the page reported by Azure.
-
-        Args:
-            page_index: the 0-based index of the page to analyze
-
-        Returns:
-            float: 0.0 if the supplied page index was not OCR'd. Otherwise
-                the page's reported rotation in degrees.
-        """
-        if _selected_page := self.page_at_index(page_index):
-            angle = _selected_page.angle or 0.0
-            if abs(angle) > self.config.MIN_OCR_ROTATION_DEGREES:
-                logger.debug("Page at index %s is rotated %.2f degrees", page_index, angle)
-                return angle
-        return 0.0
+        """DEPRECATED. See OCRResult.rotation_degrees."""
+        warnings.warn(
+            "AzureDocIntelIntegrator.rotation_degrees is deprecated. Use "
+            "OCRResult.rotation_degrees (e.g. via PdfExtract.ocr_result) "
+            "instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        result = getattr(self._thread_local, "ocr_result", None)
+        return result.rotation_degrees(page_index) if result is not None else 0.0
 
     def page_at_index(self, page_index: int) -> DocumentPage | None:
-        """
-        Returns the DocumentPage instance having the given page *index* or None.
-
-        Args:
-            page_index: the 0-based index of the page to analyze
-
-        Returns:
-            DocumentPage | None: None if the supplied page index was not OCR'd.
-        """
-        if any(
-            # find the page at the supplied index and report its angle. otherwise return 0.0.
-            (_selected_page := page).page_number == page_index + 1
-            for page in self._thread_local.last_result.pages
-        ):
-            return _selected_page
-        # page was not OCR'd. Return None.
-        return None
+        """DEPRECATED. See OCRResult.page_at_index."""
+        warnings.warn(
+            "AzureDocIntelIntegrator.page_at_index is deprecated. Use "
+            "OCRResult.page_at_index (e.g. via PdfExtract.ocr_result) "
+            "instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        result = getattr(self._thread_local, "ocr_result", None)
+        return result.page_at_index(page_index) if result is not None else None
 
 
 AZURE_READ = AzureDocIntelIntegrator()
