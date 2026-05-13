@@ -922,6 +922,14 @@ class TestOCRResult(unittest.TestCase):
         )
         self.assertEqual(result.handwritten_ratio(0), 0.0)
 
+    def test_ocr_result_publicly_importable(self):
+        """OCRResult is importable from the top-level package."""
+        import pypdftotext
+        self.assertTrue(hasattr(pypdftotext, "OCRResult"))
+        from pypdftotext.ocr_result import OCRResult as _Direct
+        self.assertIs(pypdftotext.OCRResult, _Direct)
+        self.assertIn("OCRResult", pypdftotext.__all__)
+
 
 if __name__ == "__main__":
     unittest.main()
