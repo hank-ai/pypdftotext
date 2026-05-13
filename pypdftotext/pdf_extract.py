@@ -352,10 +352,12 @@ class PdfExtract:
                     json.dumps(ocr_pages, indent=2, default=str), "utf-8"
                 )
                 (self.debug_path / "azure.json").write_text(
-                    json.dumps(azure.last_result.as_dict(), indent=2), "utf-8"
+                    json.dumps(azure._thread_local.last_result.as_dict(), indent=2),
+                    "utf-8",
                 )
                 (self.debug_path / "azure_content.txt").write_text(
-                    azure.last_result.content, "utf-8"
+                    azure._thread_local.last_result.content or "",
+                    "utf-8",
                 )
             for ocr_idx, og_pg_idx in enumerate(self.ocr_page_idxs):
                 ext_pg = self.extracted_pages[og_pg_idx]

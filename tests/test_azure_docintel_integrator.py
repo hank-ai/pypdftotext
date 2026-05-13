@@ -132,5 +132,90 @@ class TestSubmit(unittest.TestCase):
         )
 
 
+class TestAwaitOne(unittest.TestCase):
+    def setUp(self):
+        with _client_cache_lock:
+            _client_cache.clear()
+        self.cfg = PyPdfToTextConfig(overrides={
+            "AZURE_DOCINTEL_ENDPOINT": "https://x.example",
+            "AZURE_DOCINTEL_SUBSCRIPTION_KEY": "key",
+            "AZURE_DOCINTEL_TIMEOUT": 30,
+        })
+
+    def _populated_analyze_result(self, num_pages=1):
+        from azure.ai.documentintelligence.models import AnalyzeResult
+        return AnalyzeResult({
+            "apiVersion": "2024-11-30",
+            "modelId": "prebuilt-read",
+            "stringIndexType": "textElements",
+            "content": " ".join(f"page{i+1}" for i in range(num_pages)),
+            "pages": [
+                {"pageNumber": i + 1, "angle": 0.0, "width": 8.5, "height": 11.0,
+                 "unit": "inch", "spans": [{"offset": i * 6, "length": 5}],
+                 "words": [], "lines": [], "selectionMarks": []}
+                for i in range(num_pages)
+            ],
+            "styles": [],
+        })
+
+    def test_await_one_success(self):
+        """Happy path: poller returns AnalyzeResult → OCRResult.succeeded."""
+        raw = self._populated_analyze_result(num_pages=2)
+        poller = MagicMock(name="poller")
+        poller.result.return_value = raw
+        integrator = AzureDocIntelIntegrator(self.cfg)
+        result = integrator.await_one(poller, pdf_name="x.pdf")
+        self.assertTrue(result.succeeded)
+        self.assertEqual(len(result.pages), 2)
+        self.assertIs(result.raw, raw)
+        self.assertIsNone(result.error)
+
+    def test_await_one_timeout_yields_error_result(self):
+        """REGRESSION: poller.result(timeout) returns None on timeout. Must
+        produce OCRResult(error="OCR timeout: ...") and not crash."""
+        poller = MagicMock(name="poller")
+        poller.result.return_value = None
+        # Provide a polling method so cancel_event.set() doesn't crash.
+        poller._polling_method = MagicMock()
+        poller._polling_method.cancel_event = threading.Event()
+        integrator = AzureDocIntelIntegrator(self.cfg)
+        result = integrator.await_one(poller, pdf_name="x.pdf")
+        self.assertFalse(result.succeeded)
+        self.assertIsNone(result.raw)
+        self.assertEqual(result.pages, [])
+        self.assertIsNotNone(result.error)
+        self.assertTrue(result.error.startswith("OCR timeout"))
+        # The cancel_event should have been set so the daemon poll thread can exit.
+        self.assertTrue(poller._polling_method.cancel_event.is_set())
+
+    def test_await_one_error_paths(self):
+        """Parametrized: HttpResponseError and empty-pages produce OCRResult.error."""
+        from azure.core.exceptions import HttpResponseError
+        integrator = AzureDocIntelIntegrator(self.cfg)
+
+        # 1. Poller raises HttpResponseError.
+        poller_http = MagicMock(name="poller_http")
+        poller_http.result.side_effect = HttpResponseError("server error")
+        poller_http._polling_method = MagicMock()
+        poller_http._polling_method.cancel_event = threading.Event()
+        result_http = integrator.await_one(poller_http, pdf_name="x.pdf")
+        self.assertFalse(result_http.succeeded)
+        self.assertTrue(result_http.error.startswith("OCR failed"))
+        self.assertIn("HttpResponseError", result_http.error)
+
+        # 2. AnalyzeResult with zero pages.
+        from azure.ai.documentintelligence.models import AnalyzeResult
+        empty_result = AnalyzeResult({
+            "apiVersion": "2024-11-30", "modelId": "prebuilt-read",
+            "stringIndexType": "textElements", "content": "",
+            "pages": [], "styles": [],
+        })
+        poller_empty = MagicMock(name="poller_empty")
+        poller_empty.result.return_value = empty_result
+        result_empty = integrator.await_one(poller_empty, pdf_name="x.pdf")
+        self.assertFalse(result_empty.succeeded)
+        self.assertEqual(result_empty.error, "OCR failed: empty result (analyzeResult.pages was empty)")
+
+
 if __name__ == "__main__":
     unittest.main()

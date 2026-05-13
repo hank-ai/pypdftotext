@@ -9,12 +9,14 @@ from dataclasses import dataclass, field
 from azure.ai.documentintelligence import AnalyzeDocumentLROPoller, DocumentIntelligenceClient
 from azure.ai.documentintelligence.models import AnalyzeResult, DocumentPage
 from azure.core.credentials import AzureKeyCredential
+from azure.core.exceptions import AzureError, HttpResponseError
 from azure.core.pipeline.transport import RequestsTransport
 from tqdm import tqdm
 
 from . import layout
 from ._cancellable_polling import CancellablePolling
 from ._config import PyPdfToTextConfig
+from .ocr_result import OCRResult
 
 logger = logging.getLogger(__name__)
 
@@ -75,7 +77,11 @@ class AzureDocIntelIntegrator:
 
     config: PyPdfToTextConfig = field(default_factory=PyPdfToTextConfig)
     client: DocumentIntelligenceClient | None = field(default=None, init=False, repr=False)
-    last_result: AnalyzeResult = field(default_factory=lambda: AnalyzeResult({}), init=False)
+    _thread_local: threading.local = field(
+        default_factory=threading.local,
+        init=False,
+        repr=False,
+    )
 
     def create_client(self) -> bool:
         """
@@ -107,7 +113,7 @@ class AzureDocIntelIntegrator:
 
     def reset(self):
         """Clear last_result from previous run."""
-        self.last_result = AnalyzeResult({})
+        self._thread_local.last_result = AnalyzeResult({})
 
     def submit(
         self,
@@ -160,6 +166,83 @@ class AzureDocIntelIntegrator:
         )
         return poller
 
+    def await_one(
+        self,
+        poller: AnalyzeDocumentLROPoller,
+        pdf_name: str = "",
+        *,
+        config: PyPdfToTextConfig | None = None,
+    ) -> OCRResult:
+        """Wait for the given poller to complete and build an OCRResult.
+
+        On timeout, the poller's CancellablePolling.cancel_event is set so
+        the SDK's daemon poll thread terminates cleanly. The returned
+        OCRResult carries error=str when the wait timed out, the SDK raised
+        an AzureError, or the result had zero pages.
+
+        Updates ``self._thread_local`` for deprecated callers of
+        ``self.last_result`` / ``self.handwritten_ratio`` / etc.
+
+        Args:
+            poller: poller previously returned by ``self.submit``.
+            pdf_name: identifier for log correlation; carried into the
+                returned OCRResult.
+            config: optional per-call override. Defaults to ``self.config``.
+
+        Returns:
+            An OCRResult. Never raises on Azure/timeout errors; check
+            ``result.succeeded`` and ``result.error``.
+        """
+        cfg = config or self.config
+        prefix = f"[{pdf_name}] " if pdf_name else ""
+        raw: AnalyzeResult | None
+        error: str | None = None
+        try:
+            raw = poller.result(cfg.AZURE_DOCINTEL_TIMEOUT)
+        except HttpResponseError as e:
+            raw = None
+            error = f"OCR failed: HttpResponseError: {e}"
+        except AzureError as e:
+            raw = None
+            error = f"OCR failed: {type(e).__name__}: {e}"
+        if raw is None and error is None:
+            # poller.result returned None — the timeout-without-exception case.
+            error = (
+                f"OCR timeout: poller returned no analyzeResult after "
+                f"{cfg.AZURE_DOCINTEL_TIMEOUT}s"
+            )
+        if error is not None:
+            # Signal the daemon poll thread to exit. Best-effort: not all
+            # mocked pollers have a CancellablePolling, so guard the access.
+            polling_method = getattr(poller, "_polling_method", None)
+            cancel_event = getattr(polling_method, "cancel_event", None)
+            if cancel_event is not None:
+                cancel_event.set()
+        pages: list[str] = []
+        if raw is not None and not raw.pages:
+            error = error or "OCR failed: empty result (analyzeResult.pages was empty)"
+        elif raw is not None:
+            pages = [layout.fixed_width_page(doc_page, cfg) for doc_page in raw.pages]
+        result = OCRResult(
+            pdf_name=pdf_name,
+            config=cfg,
+            raw=raw,
+            pages=pages,
+            error=error,
+        )
+        # Update thread-local for back-compat consumers.
+        self._thread_local.last_result = raw if raw is not None else AnalyzeResult({})
+        self._thread_local.ocr_result = result
+        if result.succeeded:
+            logger.info(
+                "%sOCR completed: %d pages rendered.",
+                prefix,
+                len(result.pages),
+            )
+        else:
+            logger.error("%sOCR did not complete: %s", prefix, result.error)
+        return result
+
     def ocr_pages(self, pdf: bytes, pages: list[int], pdf_name: str = "") -> list[str]:
         """
         Read the text from supplied pdf page indices.
@@ -188,12 +271,13 @@ class AzureDocIntelIntegrator:
             body=io.BytesIO(pdf),
             pages=",".join(str(pg + 1) for pg in pages),
         )
-        self.last_result = poller.result(self.config.AZURE_DOCINTEL_TIMEOUT)
+        # (Temporary: Task 11 swaps ocr_pages to a thin wrapper around submit+await_one.)
+        self._thread_local.last_result = poller.result(self.config.AZURE_DOCINTEL_TIMEOUT)
         logger.info(
             "%s%s pages OCR'd successfully. Creating fixed width pages.", prefix, len(pages)
         )
         ocr_pbar = tqdm(
-            self.last_result.pages,
+            self._thread_local.last_result.pages,
             desc="Processing OCR results...",
             disable=self.config.DISABLE_PROGRESS_BAR,
             position=self.config.PROGRESS_BAR_POSITION,
@@ -243,7 +327,9 @@ class AzureDocIntelIntegrator:
                 sel.span.length for sel in _selected_page.selection_marks or []
             )
             # finally, we'll ignore newline chars that occur in the page span
-            page_length_reduction += self.last_result.content[page_start:page_end].count("\n")
+            page_length_reduction += self._thread_local.last_result.content[
+                page_start:page_end
+            ].count("\n")
             page_length = page_end - page_start - page_length_reduction
             if page_length <= 0:
                 # whoops! something's wrong. We should probably throw an exception here, but
@@ -262,7 +348,7 @@ class AzureDocIntelIntegrator:
             handwritten_length = sum(
                 (
                     (span.offset + min(span.length, page_end)) - span.offset
-                    for style in (self.last_result.styles or [])
+                    for style in (self._thread_local.last_result.styles or [])
                     if style.is_handwritten
                     and style.confidence >= self.config.OCR_HANDWRITTEN_CONFIDENCE_LIMIT
                     for span in style.spans
@@ -311,7 +397,7 @@ class AzureDocIntelIntegrator:
         if any(
             # find the page at the supplied index and report its angle. otherwise return 0.0.
             (_selected_page := page).page_number == page_index + 1
-            for page in self.last_result.pages
+            for page in self._thread_local.last_result.pages
         ):
             return _selected_page
         # page was not OCR'd. Return None.
