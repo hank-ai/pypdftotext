@@ -814,5 +814,24 @@ class TestPdfExtract(unittest.TestCase):
         self.assertEqual(len(pdf.extracted_pages), original_count - 1)
 
 
+class TestExtractedPageOcrError(unittest.TestCase):
+    def test_ocr_error_defaults_to_none(self):
+        """ExtractedPage.ocr_error is None by default."""
+        from unittest.mock import MagicMock
+        from pypdftotext.extracted_page import ExtractedPage
+        # Use any page from any sample PDF; we don't need OCR to test the field.
+        # Construct a minimal mock PageObject via MagicMock.
+        page = ExtractedPage(page_obj=MagicMock(), handwritten_ratio=0.0, text="hello")
+        self.assertIsNone(page.ocr_error)
+
+    def test_ocr_error_can_be_set(self):
+        """ExtractedPage.ocr_error accepts string assignment."""
+        from unittest.mock import MagicMock
+        from pypdftotext.extracted_page import ExtractedPage
+        page = ExtractedPage(page_obj=MagicMock(), handwritten_ratio=0.0, text="")
+        page.ocr_error = "OCR timeout: simulated"
+        self.assertEqual(page.ocr_error, "OCR timeout: simulated")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -35,6 +35,8 @@ class ExtractedPage:
             PdfExtract().assign_document_indices() will dynamically set this value.
         header: Text detected as a header on this page.
         footer: Text detected as a footer on this page.
+        ocr_error: Failure reason set when OCR was attempted and failed. None
+            when OCR succeeded or was never attempted.
     """
 
     page_obj: PageObject
@@ -45,6 +47,9 @@ class ExtractedPage:
     document_idx: int = 0
     header: str = ""
     footer: str = ""
+    ocr_error: str | None = None
+    """Failure reason set when OCR was attempted and did not complete successfully.
+    None if OCR succeeded OR if OCR was never attempted for this page."""
 
     @cached_property
     def fingerprint(self):
