@@ -102,7 +102,7 @@ class OCRResult:
         confidence threshold for counting a span as handwritten. Returns 0.0
         when the OCR call failed or the page has no text.
         """
-        if self.raw is None:
+        if self.raw is None or not self.raw.content:
             return 0.0
         page = self.page_at_index(page_index)
         if page is None or not page.spans:
