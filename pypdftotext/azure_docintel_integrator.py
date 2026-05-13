@@ -4,6 +4,7 @@ import io
 import logging
 import os
 import threading
+import warnings
 from dataclasses import dataclass, field
 
 from azure.ai.documentintelligence import AnalyzeDocumentLROPoller, DocumentIntelligenceClient
@@ -83,6 +84,27 @@ class AzureDocIntelIntegrator:
         repr=False,
     )
 
+    def reset(self):
+        """Clear last_result from previous run."""
+        self._thread_local.last_result = AnalyzeResult({})
+
+    @property
+    def last_result(self) -> AnalyzeResult:
+        """DEPRECATED. The raw AnalyzeResult from this thread's most recent
+        await_one call, or AnalyzeResult({}) if no OCR has run on this thread.
+
+        Replaced by ``PdfExtract.ocr_result.raw`` (or ``OCRResult.raw``).
+        Will be removed in a future minor release.
+        """
+        warnings.warn(
+            "AzureDocIntelIntegrator.last_result is deprecated and will be "
+            "removed in a future release. Use PdfExtract.ocr_result.raw or "
+            "OCRResult.raw instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return getattr(self._thread_local, "last_result", AnalyzeResult({}))
+
     def create_client(self) -> bool:
         """
         Create an Azure DocumentIntelligenceClient based on current global
@@ -110,10 +132,6 @@ class AzureDocIntelIntegrator:
             return True
         logger.error("Failed to create Azure OCR Client at endpoint='%s'", endpoint)
         return False
-
-    def reset(self):
-        """Clear last_result from previous run."""
-        self._thread_local.last_result = AnalyzeResult({})
 
     def submit(
         self,

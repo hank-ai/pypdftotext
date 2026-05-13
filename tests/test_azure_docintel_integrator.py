@@ -217,5 +217,51 @@ class TestAwaitOne(unittest.TestCase):
         self.assertEqual(result_empty.error, "OCR failed: empty result (analyzeResult.pages was empty)")
 
 
+class TestDeprecatedSurface(unittest.TestCase):
+    def setUp(self):
+        with _client_cache_lock:
+            _client_cache.clear()
+        self.cfg = PyPdfToTextConfig(overrides={
+            "AZURE_DOCINTEL_ENDPOINT": "https://x.example",
+            "AZURE_DOCINTEL_SUBSCRIPTION_KEY": "key",
+        })
+
+    def _run_one_ocr(self, integrator):
+        """Helper: run a fake successful OCR so thread-local is populated."""
+        from azure.ai.documentintelligence.models import AnalyzeResult
+        raw = AnalyzeResult({
+            "apiVersion": "2024-11-30", "modelId": "prebuilt-read",
+            "stringIndexType": "textElements", "content": "page1",
+            "pages": [{"pageNumber": 1, "angle": 0.0, "width": 8.5, "height": 11.0,
+                       "unit": "inch", "spans": [{"offset": 0, "length": 5}],
+                       "words": [], "lines": [], "selectionMarks": []}],
+            "styles": [],
+        })
+        poller = MagicMock()
+        poller.result.return_value = raw
+        return integrator.await_one(poller, pdf_name="x.pdf"), raw
+
+    def test_last_result_emits_deprecation_warning(self):
+        integrator = AzureDocIntelIntegrator(self.cfg)
+        _, raw = self._run_one_ocr(integrator)
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            value = integrator.last_result
+        self.assertEqual(len(caught), 1)
+        self.assertEqual(caught[0].category, DeprecationWarning)
+        self.assertIs(value, raw)
+
+    def test_last_result_default_when_no_ocr_on_thread(self):
+        """Accessing last_result before any OCR on this thread returns the
+        empty AnalyzeResult sentinel (back-compat with the original init)."""
+        from azure.ai.documentintelligence.models import AnalyzeResult
+        integrator = AzureDocIntelIntegrator(self.cfg)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)
+            value = integrator.last_result
+        self.assertIsInstance(value, AnalyzeResult)
+        self.assertIsNone(value.pages)  # AnalyzeResult({}).pages is None.
+
+
 if __name__ == "__main__":
     unittest.main()
