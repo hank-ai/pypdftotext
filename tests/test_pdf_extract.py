@@ -833,5 +833,95 @@ class TestExtractedPageOcrError(unittest.TestCase):
         self.assertEqual(page.ocr_error, "OCR timeout: simulated")
 
 
+class TestOCRResult(unittest.TestCase):
+    def _fake_analyze_result_dict(self, num_pages=2):
+        """Build a minimal dict suitable for AnalyzeResult.__init__."""
+        return {
+            "apiVersion": "2024-11-30",
+            "modelId": "prebuilt-read",
+            "stringIndexType": "textElements",
+            "content": "page1 text\npage2 text",
+            "pages": [
+                {"pageNumber": i + 1, "angle": 0.0, "width": 8.5, "height": 11.0,
+                 "unit": "inch", "spans": [{"offset": i * 11, "length": 10}],
+                 "words": [], "lines": [], "selectionMarks": []}
+                for i in range(num_pages)
+            ],
+            "styles": [],
+        }
+
+    def test_succeeded_true_when_raw_has_pages_and_no_error(self):
+        from azure.ai.documentintelligence.models import AnalyzeResult
+        from pypdftotext import PyPdfToTextConfig
+        from pypdftotext.ocr_result import OCRResult
+        raw = AnalyzeResult(self._fake_analyze_result_dict(num_pages=1))
+        result = OCRResult(
+            pdf_name="x.pdf",
+            config=PyPdfToTextConfig(),
+            raw=raw,
+            pages=["page1 text"],
+        )
+        self.assertTrue(result.succeeded)
+        self.assertIsNone(result.error)
+
+    def test_succeeded_false_when_error_set(self):
+        from pypdftotext import PyPdfToTextConfig
+        from pypdftotext.ocr_result import OCRResult
+        result = OCRResult(
+            pdf_name="x.pdf",
+            config=PyPdfToTextConfig(),
+            raw=None,
+            pages=[],
+            error="OCR timeout: simulated",
+        )
+        self.assertFalse(result.succeeded)
+
+    def test_succeeded_false_when_raw_none(self):
+        from pypdftotext import PyPdfToTextConfig
+        from pypdftotext.ocr_result import OCRResult
+        result = OCRResult(pdf_name="x.pdf", config=PyPdfToTextConfig(), raw=None, pages=[])
+        self.assertFalse(result.succeeded)
+
+    def test_page_at_index_returns_page_when_present(self):
+        from azure.ai.documentintelligence.models import AnalyzeResult
+        from pypdftotext import PyPdfToTextConfig
+        from pypdftotext.ocr_result import OCRResult
+        raw = AnalyzeResult(self._fake_analyze_result_dict(num_pages=2))
+        result = OCRResult(
+            pdf_name="x.pdf", config=PyPdfToTextConfig(), raw=raw, pages=["a", "b"],
+        )
+        page = result.page_at_index(0)
+        self.assertIsNotNone(page)
+        self.assertEqual(page.page_number, 1)
+        page2 = result.page_at_index(1)
+        self.assertEqual(page2.page_number, 2)
+
+    def test_page_at_index_returns_none_when_missing(self):
+        from azure.ai.documentintelligence.models import AnalyzeResult
+        from pypdftotext import PyPdfToTextConfig
+        from pypdftotext.ocr_result import OCRResult
+        raw = AnalyzeResult(self._fake_analyze_result_dict(num_pages=1))
+        result = OCRResult(
+            pdf_name="x.pdf", config=PyPdfToTextConfig(), raw=raw, pages=["a"],
+        )
+        self.assertIsNone(result.page_at_index(99))
+
+    def test_rotation_degrees_zero_when_page_missing(self):
+        from pypdftotext import PyPdfToTextConfig
+        from pypdftotext.ocr_result import OCRResult
+        result = OCRResult(pdf_name="x.pdf", config=PyPdfToTextConfig(), raw=None, pages=[])
+        self.assertEqual(result.rotation_degrees(0), 0.0)
+
+    def test_handwritten_ratio_zero_when_no_styles(self):
+        from azure.ai.documentintelligence.models import AnalyzeResult
+        from pypdftotext import PyPdfToTextConfig
+        from pypdftotext.ocr_result import OCRResult
+        raw = AnalyzeResult(self._fake_analyze_result_dict(num_pages=1))
+        result = OCRResult(
+            pdf_name="x.pdf", config=PyPdfToTextConfig(), raw=raw, pages=["a"],
+        )
+        self.assertEqual(result.handwritten_ratio(0), 0.0)
+
+
 if __name__ == "__main__":
     unittest.main()
