@@ -85,22 +85,25 @@ def await_all(
 ) -> dict[str, OCRResult]:
     """Collectively wait for many pollers and return one OCRResult per name.
 
-    Registers a done-callback on each poller. The callback builds an OCRResult
-    via ``integrator.await_one`` (which returns near-instantly because the
-    poller is already done when the callback fires) and records it in a shared
-    dict. Blocks until either all callbacks have fired or the overall
-    ``timeout`` elapses.
+    Registers a done-callback on each poller. The callback only records
+    completion (sets an Event when all are done). The coordinating thread
+    then harvests results via ``integrator.await_one`` — this must happen
+    on the coordinator thread, NOT inside the callback, because Azure SDK
+    callbacks fire on the poller's own daemon thread and calling
+    ``poller.result()`` from that thread triggers
+    ``RuntimeError: cannot join current thread``.
 
     On timeout: sets ``cancel_event`` on every poller whose result is still
     missing, waits up to ``_BUDGET_GRACE_SECONDS`` for late callbacks
     (lucky-race window), then synthesizes
-    ``OCRResult(error="OCR batch budget exceeded ...")`` for any still missing.
+    ``OCRResult(error="OCR batch budget exceeded ...")`` for any still
+    missing.
 
     Args:
         pollers: dict mapping pdf_name to poller.
-        integrator: the integrator whose await_one is used inside the
-            callback. Its ``_thread_local`` is updated for the LAST callback
-            to fire (race outcome; matches the "undefined in batch context"
+        integrator: the integrator whose await_one is used during the
+            harvest phase. Its ``_thread_local`` is updated for the LAST
+            harvest to complete (matches the "undefined in batch context"
             semantics for AZURE_READ.last_result).
         timeout: overall budget in seconds. None means wait indefinitely.
         config: optional per-batch config override for ``await_one``.
@@ -112,40 +115,60 @@ def await_all(
     results: dict[str, OCRResult] = {}
     done_event = threading.Event()
     lock = threading.Lock()
+    completed: set[str] = set()
     total = len(pollers)
     if total == 0:
         return results
 
-    def _on_done(name: str, poller) -> None:
-        result = integrator.await_one(poller, pdf_name=name, config=cfg)
+    def _on_done(name: str) -> None:
+        # CRITICAL: do NOT call poller.result() / await_one() here. This
+        # callback fires on the SDK's daemon polling thread, which would
+        # deadlock or raise on Thread.join(self). Just signal completion;
+        # the coordinator thread does the result extraction.
         with lock:
-            if name not in results:
-                results[name] = result
-                if len(results) == total:
+            if name not in completed:
+                completed.add(name)
+                if len(completed) == total:
                     done_event.set()
 
     for name, poller in pollers.items():
-        # Capture name via default arg to avoid late-binding closure bug.
-        poller.add_done_callback(lambda p, n=name: _on_done(n, p))
+        # SDK passes the polling method to the callback; we ignore it via _pm.
+        poller.add_done_callback(lambda _pm, n=name: _on_done(n))
 
+    # Phase 1: wait for all callbacks to fire (or timeout).
     if not done_event.wait(timeout):
-        pending_names = [n for n in pollers if n not in results]
+        # Budget elapsed. Cancel pending pollers and wait briefly for late
+        # callbacks (lucky-race window).
+        with lock:
+            pending_names = [n for n in pollers if n not in completed]
         for n in pending_names:
             polling_method = getattr(pollers[n], "_polling_method", None)
             cancel_event = getattr(polling_method, "cancel_event", None)
             if cancel_event is not None:
                 cancel_event.set()
         done_event.wait(_BUDGET_GRACE_SECONDS)
-        with lock:
-            for n in pollers:
-                if n not in results:
-                    results[n] = OCRResult(
-                        pdf_name=n,
-                        config=cfg,
-                        raw=None,
-                        pages=[],
-                        error=(f"OCR batch budget exceeded after {timeout}s (pdf still pending)"),
-                    )
+
+    # Phase 2: harvest results on the coordinating thread.
+    # Safe to call poller.result() here because we are NOT the daemon
+    # polling thread; the thread that just finished polling is the one
+    # we're joining, not ourselves.
+    with lock:
+        completed_snapshot = set(completed)
+    for name in pollers:
+        if name in completed_snapshot:
+            results[name] = integrator.await_one(
+                pollers[name],
+                pdf_name=name,
+                config=cfg,
+            )
+        else:
+            results[name] = OCRResult(
+                pdf_name=name,
+                config=cfg,
+                raw=None,
+                pages=[],
+                error=(f"OCR batch budget exceeded after {timeout}s (pdf still pending)"),
+            )
     return results
 
 

@@ -101,5 +101,67 @@ class TestAwaitAll(unittest.TestCase):
         self.assertTrue(poller_b._polling_method.cancel_event.is_set())
 
 
+class TestAwaitAllThreadSafety(unittest.TestCase):
+    """Regression: callbacks must NOT call poller.result() because they fire
+    on the SDK's daemon polling thread, which would self-join."""
+
+    def setUp(self):
+        self.cfg = PyPdfToTextConfig(overrides={
+            "AZURE_DOCINTEL_ENDPOINT": "https://x.example",
+            "AZURE_DOCINTEL_SUBSCRIPTION_KEY": "key",
+        })
+        self.integrator = AzureDocIntelIntegrator(self.cfg)
+
+    def test_callback_does_not_call_result(self):
+        """If await_all's callback called poller.result() on the daemon
+        thread, real SDK pollers would raise RuntimeError. Verify the
+        callback only signals completion — poller.result() is called from
+        the coordinating thread later."""
+        from azure.ai.documentintelligence.models import AnalyzeResult
+
+        # Construct a poller mock that tracks which thread calls result().
+        result_thread = {}
+        raw = AnalyzeResult({
+            "apiVersion": "2024-11-30", "modelId": "prebuilt-read",
+            "stringIndexType": "textElements", "content": "x",
+            "pages": [{"pageNumber": 1, "angle": 0.0, "width": 8.5,
+                       "height": 11.0, "unit": "inch",
+                       "spans": [{"offset": 0, "length": 1}],
+                       "words": [], "lines": [], "selectionMarks": []}],
+            "styles": [],
+        })
+
+        poller = MagicMock()
+        poller._polling_method = MagicMock()
+        poller._polling_method.cancel_event = threading.Event()
+
+        # Simulate the SDK firing the callback on a DIFFERENT thread (its
+        # own daemon thread), not the coordinator thread.
+        def fire_on_daemon_thread(fn):
+            t = threading.Thread(
+                target=fn, args=(poller._polling_method,), daemon=True,
+            )
+            t.start()
+            t.join()  # ensure callback completes before add_done_callback returns
+
+        poller.add_done_callback.side_effect = fire_on_daemon_thread
+
+        def record_thread_and_return(*args, **kwargs):
+            result_thread["name"] = threading.current_thread().name
+            return raw
+
+        poller.result.side_effect = record_thread_and_return
+
+        coordinator_thread_name = threading.current_thread().name
+        results = await_all({"pdf1": poller}, self.integrator, timeout=2.0, config=self.cfg)
+
+        self.assertEqual(len(results), 1)
+        self.assertTrue(results["pdf1"].succeeded)
+        # poller.result() MUST have been called from the coordinator thread
+        # (not the daemon thread that fired the callback). If the callback
+        # called result(), result_thread['name'] would be the daemon's name.
+        self.assertEqual(result_thread.get("name"), coordinator_thread_name)
+
+
 if __name__ == "__main__":
     unittest.main()
