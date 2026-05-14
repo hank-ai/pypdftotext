@@ -12,7 +12,6 @@ from azure.ai.documentintelligence import AnalyzeDocumentLROPoller, DocumentInte
 from azure.ai.documentintelligence.models import AnalyzeResult, DocumentPage
 from azure.core.credentials import AzureKeyCredential
 from azure.core.exceptions import AzureError, HttpResponseError
-from azure.core.pipeline.transport import RequestsTransport
 
 from . import layout
 from ._cancellable_polling import CancellablePolling
@@ -20,6 +19,25 @@ from ._config import PyPdfToTextConfig
 from .ocr_result import OCRResult
 
 logger = logging.getLogger(__name__)
+
+
+class _Urllib3PoolFullFilter(logging.Filter):
+    """Suppress urllib3's 'Connection pool is full' warnings.
+
+    urllib3 logs this whenever a completed connection can't be returned to
+    its idle pool (because the pool is at capacity) and gets closed instead.
+    For pypdftotext's submit-and-await OCR pattern, every in-flight request
+    succeeds regardless — the warning concerns connection-reuse efficiency,
+    which is irrelevant for typical batch-once OCR usage. Suppress at module
+    import to keep production logs clean.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return "Connection pool is full" not in record.getMessage()
+
+
+logging.getLogger("urllib3.connectionpool").addFilter(_Urllib3PoolFullFilter())
+
 
 _client_cache: dict[tuple[str, str], DocumentIntelligenceClient] = {}
 """Process-wide cache of DocumentIntelligenceClient instances keyed by
@@ -34,8 +52,7 @@ def client_for(config: PyPdfToTextConfig) -> DocumentIntelligenceClient | None:
     """Return a DocumentIntelligenceClient for the given config's credentials.
 
     Clients are cached by (endpoint, key) tuple, so rotating credentials
-    transparently produces a new client. The underlying urllib3 connection
-    pool size is taken from ``config.AZURE_CLIENT_POOL_MAXSIZE``.
+    transparently produces a new client.
 
     Environment variables ``AZURE_DOCINTEL_ENDPOINT`` and
     ``AZURE_DOCINTEL_SUBSCRIPTION_KEY`` take precedence over config fields,
@@ -53,19 +70,14 @@ def client_for(config: PyPdfToTextConfig) -> DocumentIntelligenceClient | None:
     with _client_cache_lock:
         client = _client_cache.get(cache_key)
         if client is None:
-            transport = RequestsTransport(
-                connection_pool_maxsize=config.AZURE_CLIENT_POOL_MAXSIZE,
-            )
             client = DocumentIntelligenceClient(
                 endpoint,
                 AzureKeyCredential(key),
-                transport=transport,
             )
             _client_cache[cache_key] = client
             logger.info(
-                "Cached new Azure OCR client: endpoint='%s', pool_maxsize=%s",
+                "Cached new Azure OCR client: endpoint='%s'",
                 endpoint,
-                config.AZURE_CLIENT_POOL_MAXSIZE,
             )
         return client
 

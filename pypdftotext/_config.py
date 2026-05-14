@@ -17,7 +17,6 @@ class PyPdfToTextConfigOverrides(TypedDict, total=False):
     """
 
     INHERIT_CONSTANTS: bool
-    AZURE_CLIENT_POOL_MAXSIZE: int
     AZURE_DOCINTEL_ENDPOINT: str
     AZURE_DOCINTEL_SUBSCRIPTION_KEY: str
     AZURE_DOCINTEL_AUTO_CLIENT: bool
@@ -80,10 +79,6 @@ class _ConfigMixIn:
     """How long to wait for Azure OCR results before timing out. Default is 60."""
     AZURE_DOCINTEL_MODEL: Literal["prebuilt-read", "prebuilt-layout"] = "prebuilt-read"
     """The value to use for the 'model_id' parameter when calling the Azure API"""
-    AZURE_CLIENT_POOL_MAXSIZE: int = 20
-    """urllib3 connection pool size for the shared DocumentIntelligenceClient.
-    Default sized for MAX_WORKERS=10 with headroom. Increase if running batches
-    that submit more concurrent OCR requests than this value."""
     DISABLE_OCR: bool = False
     """Set to True to disable all OCR operations and return 'code behind' text
     only."""
