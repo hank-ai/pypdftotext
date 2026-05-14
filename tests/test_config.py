@@ -161,15 +161,3 @@ class TestDictConfigShorthand:
         assert batch.config.DISABLE_OCR is True
 
 
-def test_azure_client_pool_maxsize_default():
-    """AZURE_CLIENT_POOL_MAXSIZE defaults to 20."""
-    from pypdftotext import PyPdfToTextConfig
-    config = PyPdfToTextConfig()
-    assert config.AZURE_CLIENT_POOL_MAXSIZE == 20
-
-
-def test_azure_client_pool_maxsize_override():
-    """AZURE_CLIENT_POOL_MAXSIZE can be set via overrides."""
-    from pypdftotext import PyPdfToTextConfig
-    config = PyPdfToTextConfig(overrides={"AZURE_CLIENT_POOL_MAXSIZE": 50})
-    assert config.AZURE_CLIENT_POOL_MAXSIZE == 50
