@@ -16,19 +16,19 @@ classifiers = [
   "License :: OSI Approved :: MIT License",
   "Operating System :: OS Independent",
 ]
-dependencies = ["pypdf==6.0", "tqdm", "azure-ai-documentintelligence>=1.0.0"]
+dependencies = ["pypdf>=6.5,<7", "tqdm>=4.34", "azure-ai-documentintelligence>=1.0.0,<2"]
 
 [project.optional-dependencies]
-s3 = ["boto3"]
-image = ["pillow>=8.0.0"]
-full = ["boto3", "pillow>=8.0.0"]
+s3 = ["boto3>=1.36.6,<2"]
+image = ["pillow>=8.0.0,<13"]
+full = ["boto3>=1.36.6,<2", "pillow>=8.0.0,<13"]
 dev = [
-  "boto3",
-  "pillow>=8.0.0",
+  "boto3>=1.36.6,<2",
+  "pillow>=8.0.0,<13",
   "boto3-stubs[s3]",
-  "pytest>=7.0.0",
-  "pytest-cov>=4.0.0",
-  "ruff>=0.15.2",
+  "pytest>=7.0.0,<9",
+  "pytest-cov>=4.0.0,<8",
+  "ruff>=0.15.2,<0.16",
   "pyright>=1.1.408",
 ]
 
