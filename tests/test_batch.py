@@ -476,10 +476,6 @@ class TestPerformBatchOcrSubmitAndAwait(unittest.TestCase):
             self.assertEqual(bad_extract.extracted_pages[idx].text, "")
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class TestInvalidPdfs(unittest.TestCase):
     """PDFs that raise pypdf errors during embedded extraction are quarantined."""
 
@@ -540,3 +536,7 @@ class TestInvalidPdfs(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 batch.extract_all()
         self.assertEqual(batch.invalid_pdfs, {})
+
+
+if __name__ == "__main__":
+    unittest.main()
