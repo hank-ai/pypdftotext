@@ -1,5 +1,6 @@
 """Test module for batch processing functionality."""
 
+import logging
 import json
 import pickle
 import unittest
@@ -477,3 +478,65 @@ class TestPerformBatchOcrSubmitAndAwait(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestInvalidPdfs(unittest.TestCase):
+    """PDFs that raise pypdf errors during embedded extraction are quarantined."""
+
+    GARBAGE = b"%PDF-1.4\nthis is not a pdf"
+    NO_XREF = b"%PDF-1.7\n1 0 obj<</Type/Catalog>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF"
+
+    def setUp(self):
+        self.samples_dir = Path("samples")
+        if not (self.samples_dir / "deid_epic.pdf").exists():
+            self.skipTest("Sample PDF not available")
+        # deid_epic.pdf has embedded text, so it extracts fully with OCR disabled.
+        self.good_bytes = (self.samples_dir / "deid_epic.pdf").read_bytes()
+        self.cfg = PyPdfToTextConfig(
+            overrides={"DISABLE_OCR": True, "DISABLE_PROGRESS_BAR": True}
+        )
+
+    def test_invalid_pdfs_attr_initialized_empty(self):
+        batch = PdfExtractBatch({"good": self.good_bytes}, config=self.cfg)
+        self.assertEqual(batch.invalid_pdfs, {})
+
+    def test_pypdf_errors_are_captured_and_removed(self):
+        from pypdf.errors import PdfReadError, PdfStreamError, PyPdfError
+
+        batch = PdfExtractBatch(
+            {"good": self.good_bytes, "garbage": self.GARBAGE, "no_xref": self.NO_XREF},
+            config=self.cfg,
+        )
+        with self.assertLogs("pypdftotext.batch", level="WARNING") as cm:
+            results = batch.extract_all()
+
+        self.assertEqual(set(results), {"good"})
+        self.assertIs(results, batch.pdf_extracts)
+        self.assertEqual(set(batch.invalid_pdfs), {"garbage", "no_xref"})
+        self.assertIsInstance(batch.invalid_pdfs["garbage"], PdfStreamError)
+        self.assertIsInstance(batch.invalid_pdfs["no_xref"], PdfReadError)
+        for exc in batch.invalid_pdfs.values():
+            self.assertIsInstance(exc, PyPdfError)
+        self.assertTrue(results["good"].text.strip())
+
+        warnings = [r for r in cm.records if r.levelno == logging.WARNING]
+        self.assertEqual(len(warnings), 2)
+        self.assertTrue(any("garbage" in r.getMessage() for r in warnings))
+        self.assertTrue(any("no_xref" in r.getMessage() for r in warnings))
+
+    def test_all_invalid_returns_empty(self):
+        batch = PdfExtractBatch({"garbage": self.GARBAGE}, config=self.cfg)
+        results = batch.extract_all()
+        self.assertEqual(results, {})
+        self.assertEqual(set(batch.invalid_pdfs), {"garbage"})
+
+    def test_non_pypdf_errors_still_propagate(self):
+        from unittest.mock import PropertyMock
+
+        batch = PdfExtractBatch({"good": self.good_bytes}, config=self.cfg)
+        with patch.object(
+            PdfExtract, "extracted_pages", new_callable=PropertyMock, side_effect=RuntimeError("x")
+        ):
+            with self.assertRaises(RuntimeError):
+                batch.extract_all()
+        self.assertEqual(batch.invalid_pdfs, {})
