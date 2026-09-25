@@ -9,6 +9,7 @@ from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from pypdf import PdfReader
+from pypdf.errors import PyPdfError
 from tqdm import tqdm
 
 from ._config import PyPdfToTextConfig, PyPdfToTextConfigOverrides
@@ -42,7 +43,9 @@ class PdfExtractBatch:
         pdfs = ["file1.pdf", "file2.pdf", Path("file3.pdf")]
         batch = PdfExtractBatch(pdfs)
         pdf_extracts = batch.extract_all()
-        # pdf_extracts is a list of PdfExtract objects with text already extracted
+        # pdf_extracts is a dict of PdfExtract objects with text already extracted.
+        # PDFs that pypdf could not parse are dropped from pdf_extracts and recorded in
+        # batch.invalid_pdfs as {pdf_name: PyPdfError}.
     """
 
     def __init__(
@@ -70,6 +73,10 @@ class PdfExtractBatch:
             config = PyPdfToTextConfig(overrides=config)
         self.config = config or PyPdfToTextConfig()
         self.kwargs = kwargs
+        # PDFs that raised a pypdf error during embedded text extraction (e.g. PdfStreamError
+        # from a truncated/corrupt upload). Keyed by pdf name; such PDFs are dropped from
+        # ``pdf_extracts`` so the rest of the batch can proceed.
+        self.invalid_pdfs: dict[str, PyPdfError] = {}
         logger.info("Starting batch extraction for %s PDFs", len(self.pdfs))
         # Create the pdf extract objects but don't extract text until 'process' is called.
         self.pdf_extracts, self.s3_errors = self._pull_s3_parallel()
@@ -173,8 +180,21 @@ class PdfExtractBatch:
             logger.debug("Extracting text from %s (%s/%s)", pdf_name, i, len(self.pdfs))
             # Create PdfExtract with batch mode flag to prevent individual OCR
             pbar.set_postfix_str(pdf_name)
-            _ = pdf.extracted_pages
+            try:
+                _ = pdf.extracted_pages
+            except PyPdfError as e:
+                # Corrupt/unreadable PDF: quarantine it and keep going with the rest.
+                logger.warning(
+                    "Invalid PDF %r removed from batch: %s: %s",
+                    pdf_name,
+                    type(e).__name__,
+                    e,
+                    exc_info=logger.getEffectiveLevel() == logging.DEBUG,
+                )
+                self.invalid_pdfs[pdf_name] = e
 
+        for pdf_name in self.invalid_pdfs:
+            self.pdf_extracts.pop(pdf_name, None)
         return self.pdf_extracts
 
     def _perform_batch_ocr(self) -> dict[str, PdfExtract]:
