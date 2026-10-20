@@ -16,14 +16,11 @@ from pypdf.errors import DependencyError
 from pypdf.generic import DictionaryObject, NullObject
 from tqdm import tqdm
 
+from . import ocr_result
 from ._config import PyPdfToTextConfig, PyPdfToTextConfigOverrides
 from .azure_docintel_integrator import AZURE_READ, AzureDocIntelIntegrator
 from .extracted_page import ExtractedPage
 from .header_footer_detection import assign_headers_and_footers
-from .ocr_result import OCRResult
-from .ocr_result import handwritten_ratio as ocr_handwritten_ratio
-from .ocr_result import page_at_index as ocr_page_at_index
-from .ocr_result import rotation_degrees as ocr_rotation_degrees
 
 try:
     import boto3
@@ -109,7 +106,7 @@ class PdfExtract:
         self._azure: AzureDocIntelIntegrator | None = kwargs.get("azure")
         self._batch_mode: bool = kwargs.get("_batch_mode", False)
         self.ocr_page_idxs: list[int] = []
-        self.ocr_result: OCRResult | None = None  # set by ocr() if OCR runs
+        self.ocr_result: ocr_result.OCRResult | None = None  # set by ocr() if OCR runs
         self._reader: PdfReader | None = None
         self._writer: PdfWriter | None = None
         self._pbar: tqdm | None = None
@@ -360,7 +357,7 @@ class PdfExtract:
         result = azure.await_one(poller, pdf_name=self.pdf_name, config=self.config)
         self._apply_ocr_result(result)
 
-    def _apply_ocr_result(self, result: OCRResult) -> None:
+    def _apply_ocr_result(self, result: ocr_result.OCRResult) -> None:
         """Apply an OCRResult to self.extracted_pages.
 
         On success: each ocr_page_idx page gets its rendered text,
@@ -406,7 +403,7 @@ class PdfExtract:
                     self.config.MAX_CHARS_PER_PDF_PAGE,
                 )
                 txt = ""
-            elif rotation := ocr_rotation_degrees(raw, og_pg_idx, self.config):
+            elif rotation := ocr_result.rotation_degrees(raw, og_pg_idx, self.config):
                 if applied_rotation := -90 * int(round(rotation / 90.0)):
                     rotated_pages = True
                     ext_pg.page_obj.rotation += applied_rotation
@@ -415,8 +412,10 @@ class PdfExtract:
                     txt = txt.replace(old_, new_)
             ext_pg.text = txt
             ext_pg.source = "OCR"
-            ext_pg.handwritten_ratio = ocr_handwritten_ratio(raw, og_pg_idx, self.config)
-            ext_pg.azure_page = ocr_page_at_index(raw, og_pg_idx) if self.debug_path else None
+            ext_pg.handwritten_ratio = ocr_result.handwritten_ratio(raw, og_pg_idx, self.config)
+            ext_pg.azure_page = (
+                ocr_result.page_at_index(raw, og_pg_idx) if self.debug_path else None
+            )
             ext_pg.ocr_error = None
         if rotated_pages:
             logger.debug("[%s] Regenerating body with corrected page orientations.", self.pdf_name)
