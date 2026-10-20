@@ -21,6 +21,7 @@ class PyPdfToTextConfigOverrides(TypedDict, total=False):
     AZURE_DOCINTEL_SUBSCRIPTION_KEY: str
     AZURE_DOCINTEL_AUTO_CLIENT: bool
     AZURE_DOCINTEL_TIMEOUT: int
+    AZURE_DOCINTEL_BATCH_TIMEOUT: int | None
     AZURE_DOCINTEL_MODEL: Literal["prebuilt-read", "prebuilt-layout"]
     DISABLE_OCR: bool
     DISABLE_PROGRESS_BAR: bool
@@ -76,7 +77,12 @@ class _ConfigMixIn:
     """If True (default), the Azure Read OCR client is created automatically
     upon first use."""
     AZURE_DOCINTEL_TIMEOUT: int = 60
-    """How long to wait for Azure OCR results before timing out. Default is 60."""
+    """How long to wait, in seconds, for a single PDF's Azure OCR result, measured
+    from its submission. Default is 60."""
+    AZURE_DOCINTEL_BATCH_TIMEOUT: int | None = None
+    """Optional wall-clock budget, in seconds, for the OCR phase of a PdfExtractBatch,
+    measured from the moment all submissions complete. None (default) means no
+    batch-wide bound; AZURE_DOCINTEL_TIMEOUT still applies to each PDF individually."""
     AZURE_DOCINTEL_MODEL: Literal["prebuilt-read", "prebuilt-layout"] = "prebuilt-read"
     """The value to use for the 'model_id' parameter when calling the Azure API"""
     DISABLE_OCR: bool = False
