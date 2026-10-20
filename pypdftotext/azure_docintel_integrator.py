@@ -148,17 +148,34 @@ def iter_results(
         # harvests. The SDK passes the polling method to the callback (_pm).
         poller.add_done_callback(lambda _pm, n=name: ready.put(n))
 
-    def _harvest_expired(name: str, batch_expired: bool) -> OCRResult:
-        poller = pollers.pop(name)
-        seen.add(name)
-        polling_method = getattr(poller, "_polling_method", None)
+    def _await(poller: AnalyzeDocumentLROPoller, name: str, timeout: float | None) -> OCRResult:
+        # await_one never raises for Azure/timeout causes, but a bug in result
+        # rendering must not kill the stream and strand every PDF still pending.
+        try:
+            return integrator.await_one(poller, pdf_name=name, config=cfg, timeout=timeout)
+        except Exception as e:
+            logger.error(
+                "[%s] OCR harvest failed: %s: %s",
+                name,
+                type(e).__name__,
+                e,
+                exc_info=logger.getEffectiveLevel() == logging.DEBUG,
+            )
+            return OCRResult(pdf_name=name, error=f"OCR failed: {type(e).__name__}: {e}")
+
+    def _cancel(name: str) -> None:
+        polling_method = getattr(pollers[name], "_polling_method", None)
         cancel_event = getattr(polling_method, "cancel_event", None)
         if cancel_event is not None:
             cancel_event.set()
-        # Short join: with cancel_event set the daemon thread exits at its next
-        # wake, and if the final poll had already landed we get the real result.
-        result = integrator.await_one(
-            poller, pdf_name=name, config=cfg, timeout=_CANCEL_GRACE_SECONDS
+
+    def _harvest_expired(name: str, batch_expired: bool, grace_deadline: float) -> OCRResult:
+        seen.add(name)
+        # Short join, sharing one grace budget across the whole expiry pass: with
+        # cancel_event already set the daemon thread exits at its next wake, and
+        # if the final poll had already landed we get the real result.
+        result = _await(
+            pollers.pop(name), name, timeout=max(0.0, grace_deadline - time.monotonic())
         )
         if result.succeeded:
             return result
@@ -183,8 +200,13 @@ def iter_results(
                     expired = list(pollers)
                 else:
                     expired = [n for n in pollers if deadline[n] <= now]
+                # Cancel every expired poller first so their threads wind down
+                # concurrently; then join each against one shared grace budget.
                 for n in expired:
-                    yield n, _harvest_expired(n, batch_expired)
+                    _cancel(n)
+                grace_deadline = time.monotonic() + _CANCEL_GRACE_SECONDS
+                for n in expired:
+                    yield n, _harvest_expired(n, batch_expired, grace_deadline)
                 continue
             if name in seen or name not in pollers:
                 # Duplicate callback (azure-core fires immediately on an
@@ -192,8 +214,10 @@ def iter_results(
                 # harvested on expiry.
                 continue
             seen.add(name)
-            poller = pollers.pop(name)
-            yield name, integrator.await_one(poller, pdf_name=name, config=cfg)
+            # No local may hold the poller across the yield: the consumer applies
+            # the result while we are suspended, and the poller owns the full
+            # response body. pop() inside the call releases it on return.
+            yield name, _await(pollers.pop(name), name, timeout=None)
 
     return _iter()
 

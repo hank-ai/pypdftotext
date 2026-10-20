@@ -82,7 +82,7 @@ pip install -e ".[dev]"  # All of the above + pytest, pytest-cov, and type stubs
 
 5. **Azure OCR Integration** (`azure_docintel_integrator.py`, `ocr_result.py`):
    - `AzureDocIntelIntegrator.submit()` returns an Azure poller; `await_one()` turns a poller into an `OCRResult`
-   - Module-level `iter_results()` streams `(pdf_name, OCRResult)` in completion order, popping each poller as it is harvested. Per-PDF deadline is `AZURE_DOCINTEL_TIMEOUT` anchored at submit time; `AZURE_DOCINTEL_BATCH_TIMEOUT` (default `None`) optionally bounds the whole batch. `await_all()` is a dict-collecting wrapper.
+   - Module-level `iter_results()` streams `(pdf_name, OCRResult)` in completion order, popping each poller as it is harvested. Per-PDF deadline is `AZURE_DOCINTEL_TIMEOUT` anchored at submit time; `AZURE_DOCINTEL_BATCH_TIMEOUT` (default `None`) optionally bounds the whole batch. Expired pollers are cancelled together and joined against one shared 5-second grace budget per expiry pass (so an Azure outage winds down in seconds, not seconds-per-PDF). A non-Azure exception while harvesting one PDF becomes that PDF's error result and the stream continues. `await_all()` is a dict-collecting wrapper.
    - `DocumentIntelligenceClient` instances are cached by credentials in `client_for()`; the integrator keeps no per-call or per-thread result state
    - `ocr_result.py` holds the `OCRResult` transport dataclass (`pdf_name`, `pages`, `error`, `raw`) and the module functions `page_at_index`, `rotation_degrees`, `handwritten_ratio`, which take an `AnalyzeResult` explicitly
 

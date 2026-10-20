@@ -223,7 +223,8 @@ class TestIterResults(unittest.TestCase):
         )
         self.assertTrue(pending._polling_method.cancel_event.is_set())
         pending.result.assert_called_once()
-        self.assertEqual(pending.result.call_args.args[0], 5.0)  # _CANCEL_GRACE_SECONDS
+        # _CANCEL_GRACE_SECONDS, minus the microseconds spent since the pass began.
+        self.assertAlmostEqual(pending.result.call_args.args[0], 5.0, delta=0.5)
 
     def test_iter_results_per_pdf_deadline_anchored_at_submit_time(self):
         cfg = PyPdfToTextConfig(base=self.cfg, overrides={"AZURE_DOCINTEL_TIMEOUT": 1})
@@ -254,6 +255,64 @@ class TestIterResults(unittest.TestCase):
         out = dict(iter_results({"lucky": lucky}, self.integrator, config=cfg))
         self.assertTrue(out["lucky"].succeeded)  # result() returned the real payload after cancel
         self.assertTrue(lucky._polling_method.cancel_event.is_set())
+
+    def test_iter_results_drops_poller_reference_before_yield(self):
+        """While the consumer applies a result, nothing in iter_results may still hold
+        the harvested poller (it owns the full HTTP response body and parsed JSON)."""
+        import gc
+        import weakref
+
+        pollers = {"a": _fake_poller(immediate_result=_make_analyze_result("a"))}
+        ref = weakref.ref(pollers["a"])
+        gen = iter_results(pollers, self.integrator, config=self.cfg)
+        name, result = next(gen)
+        self.assertEqual(name, "a")
+        self.assertTrue(result.succeeded)
+        gc.collect()  # the mock has internal cycles; collect them so only live refs remain
+        self.assertIsNone(ref(), "poller still referenced while its result is being consumed")
+
+    def test_iter_results_cancels_all_expired_pollers_before_joining_any(self):
+        """Expired pollers wind down concurrently: every cancel_event is set before the
+        first grace join, and the joins share one grace budget."""
+        first = _fake_poller(immediate_result=None, fire_callbacks=False)
+        second = _fake_poller(immediate_result=None, fire_callbacks=False)
+        other_cancelled_at_join = {}
+
+        def _first_result(timeout=None):
+            other_cancelled_at_join["first"] = second._polling_method.cancel_event.is_set()
+            time.sleep(0.2)  # eat into the shared grace budget
+            return None
+
+        def _second_result(timeout=None):
+            other_cancelled_at_join["second"] = first._polling_method.cancel_event.is_set()
+            time.sleep(0.2)
+            return None
+
+        first.result.side_effect = _first_result
+        second.result.side_effect = _second_result
+        now = time.monotonic()
+        out = dict(iter_results({"first": first, "second": second}, self.integrator,
+                                config=self.cfg,
+                                submitted_at={"first": now - 100.0, "second": now - 100.0}))
+        self.assertTrue(other_cancelled_at_join["first"])
+        self.assertTrue(other_cancelled_at_join["second"])
+        self.assertFalse(out["first"].succeeded)
+        self.assertFalse(out["second"].succeeded)
+        # The second join got what was left of the single 5s budget, not a fresh 5s.
+        joins = sorted(p.result.call_args.args[0] for p in (first, second))
+        self.assertLess(joins[0], 4.9)
+        self.assertLessEqual(joins[1], 5.0)
+
+    def test_iter_results_harvest_exception_yields_error_result_and_continues(self):
+        """A non-Azure exception while harvesting one poller becomes that PDF's error
+        result; the remaining PDFs are still harvested."""
+        bad = _fake_poller(immediate_result=_make_analyze_result("bad"))
+        bad.result.side_effect = RuntimeError("renderer exploded")
+        good = _fake_poller(immediate_result=_make_analyze_result("good"))
+        out = dict(iter_results({"bad": bad, "good": good}, self.integrator, config=self.cfg))
+        self.assertFalse(out["bad"].succeeded)
+        self.assertEqual(out["bad"].error, "OCR failed: RuntimeError: renderer exploded")
+        self.assertTrue(out["good"].succeeded)
 
     def test_iter_results_callback_does_not_call_result(self):
         """Regression: the done-callback must only enqueue; poller.result() runs on the
