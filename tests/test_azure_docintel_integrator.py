@@ -169,6 +169,13 @@ class TestAwaitOne(unittest.TestCase):
         # The cancel_event should have been set so the daemon poll thread can exit.
         self.assertTrue(poller._polling_method.cancel_event.is_set())
 
+    def test_await_one_timeout_kwarg_overrides_config(self):
+        """An explicit timeout= is what gets passed to poller.result()."""
+        poller = MagicMock(name="poller")
+        poller.result.return_value = self._populated_analyze_result(num_pages=1)
+        AzureDocIntelIntegrator(self.cfg).await_one(poller, pdf_name="x.pdf", timeout=2.5)
+        poller.result.assert_called_once_with(2.5)
+
     def test_await_one_error_paths(self):
         """Parametrized: HttpResponseError and empty-pages produce OCRResult.error."""
         from azure.core.exceptions import HttpResponseError
