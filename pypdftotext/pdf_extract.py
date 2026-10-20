@@ -21,6 +21,9 @@ from .azure_docintel_integrator import AZURE_READ, AzureDocIntelIntegrator
 from .extracted_page import ExtractedPage
 from .header_footer_detection import assign_headers_and_footers
 from .ocr_result import OCRResult
+from .ocr_result import handwritten_ratio as ocr_handwritten_ratio
+from .ocr_result import page_at_index as ocr_page_at_index
+from .ocr_result import rotation_degrees as ocr_rotation_degrees
 
 try:
     import boto3
@@ -371,11 +374,12 @@ class PdfExtract:
         """
         self.ocr_result = result
         rotated_pages = False
-        if not result.succeeded:
+        if not result.succeeded or result.raw is None:
             logger.error("[%s] OCR did not complete: %s", self.pdf_name, result.error)
             for og_pg_idx in self.ocr_page_idxs:
                 self.extracted_pages[og_pg_idx].ocr_error = result.error
             return
+        raw = result.raw
         replacements = (
             [
                 (old_bytes.decode(), new_bytes.decode())
@@ -397,7 +401,7 @@ class PdfExtract:
                     self.config.MAX_CHARS_PER_PDF_PAGE,
                 )
                 txt = ""
-            elif rotation := result.rotation_degrees(og_pg_idx):
+            elif rotation := ocr_rotation_degrees(raw, og_pg_idx, self.config):
                 if applied_rotation := -90 * int(round(rotation / 90.0)):
                     rotated_pages = True
                     ext_pg.page_obj.rotation += applied_rotation
@@ -406,8 +410,8 @@ class PdfExtract:
                     txt = txt.replace(old_, new_)
             ext_pg.text = txt
             ext_pg.source = "OCR"
-            ext_pg.handwritten_ratio = result.handwritten_ratio(og_pg_idx)
-            ext_pg.azure_page = result.page_at_index(og_pg_idx)
+            ext_pg.handwritten_ratio = ocr_handwritten_ratio(raw, og_pg_idx, self.config)
+            ext_pg.azure_page = ocr_page_at_index(raw, og_pg_idx)
             ext_pg.ocr_error = None
         if rotated_pages:
             logger.debug("[%s] Regenerating body with corrected page orientations.", self.pdf_name)

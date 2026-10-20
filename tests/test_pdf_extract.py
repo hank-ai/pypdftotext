@@ -8,6 +8,7 @@ from unittest.mock import patch, MagicMock
 
 from pypdftotext import PdfExtract, constants
 from pypdftotext._config import PyPdfToTextConfig
+from pypdftotext.ocr_result import handwritten_ratio, page_at_index, rotation_degrees
 from pypdftotext.pdf_extract import AllPagesRemovedError
 
 
@@ -402,17 +403,16 @@ class TestPdfExtract(unittest.TestCase):
                     # Azure page should be set for OCR'd pages
                     self.assertIsNotNone(page.azure_page)
 
-                # Test that the integrator's methods work correctly with the results
-                # This provides coverage for handwritten_ratio and rotation_degrees
+                # The module-level helpers read the same AnalyzeResult that was
+                # applied to the extract; per-page values must agree.
                 for i in range(4):
-                    # Test handwritten_ratio method
-                    ratio = azure_integrator.handwritten_ratio(i)
+                    ratio = handwritten_ratio(self.all70th_ocr_result, i, config)
                     self.assertIsInstance(ratio, float)
                     self.assertGreaterEqual(ratio, 0.0)
                     self.assertLessEqual(ratio, 1.0)
+                    self.assertEqual(pdf.extracted_pages[i].handwritten_ratio, ratio)
 
-                    # Test rotation_degrees method
-                    rotation = azure_integrator.rotation_degrees(i)
+                    rotation = rotation_degrees(self.all70th_ocr_result, i, config)
                     self.assertIsInstance(rotation, float)
                     expected_angle = self.all70th_ocr_result.pages[i].angle or 0.0
                     if abs(expected_angle) > config.MIN_OCR_ROTATION_DEGREES:
@@ -420,8 +420,7 @@ class TestPdfExtract(unittest.TestCase):
                     else:
                         self.assertEqual(rotation, 0.0)
 
-                    # Test page_at_index method
-                    page = azure_integrator.page_at_index(i)
+                    page = page_at_index(self.all70th_ocr_result, i)
                     self.assertIsNotNone(page)
                     self.assertEqual(page.page_number, i + 1)
 
@@ -489,7 +488,7 @@ class TestPdfExtract(unittest.TestCase):
                 # Test that the rotation_degrees method was used correctly
                 rotations_found = []
                 for i in range(4):
-                    rotation = azure_integrator.rotation_degrees(i)
+                    rotation = rotation_degrees(self.all70th_ocr_result, i, config)
                     rotations_found.append(rotation)
                     expected_angle = self.all70th_ocr_result.pages[i].angle or 0.0
                     if abs(expected_angle) > config.MIN_OCR_ROTATION_DEGREES:
@@ -829,104 +828,6 @@ class TestExtractedPageOcrError(unittest.TestCase):
         self.assertEqual(page.ocr_error, "OCR timeout: simulated")
 
 
-class TestOCRResult(unittest.TestCase):
-    def _fake_analyze_result_dict(self, num_pages=2):
-        """Build a minimal dict suitable for AnalyzeResult.__init__."""
-        return {
-            "apiVersion": "2024-11-30",
-            "modelId": "prebuilt-read",
-            "stringIndexType": "textElements",
-            "content": "page1 text\npage2 text",
-            "pages": [
-                {"pageNumber": i + 1, "angle": 0.0, "width": 8.5, "height": 11.0,
-                 "unit": "inch", "spans": [{"offset": i * 11, "length": 10}],
-                 "words": [], "lines": [], "selectionMarks": []}
-                for i in range(num_pages)
-            ],
-            "styles": [],
-        }
-
-    def test_succeeded_true_when_raw_has_pages_and_no_error(self):
-        from azure.ai.documentintelligence.models import AnalyzeResult
-        from pypdftotext import PyPdfToTextConfig
-        from pypdftotext.ocr_result import OCRResult
-        raw = AnalyzeResult(self._fake_analyze_result_dict(num_pages=1))
-        result = OCRResult(
-            pdf_name="x.pdf",
-            config=PyPdfToTextConfig(),
-            raw=raw,
-            pages=["page1 text"],
-        )
-        self.assertTrue(result.succeeded)
-        self.assertIsNone(result.error)
-
-    def test_succeeded_false_when_error_set(self):
-        from pypdftotext import PyPdfToTextConfig
-        from pypdftotext.ocr_result import OCRResult
-        result = OCRResult(
-            pdf_name="x.pdf",
-            config=PyPdfToTextConfig(),
-            raw=None,
-            pages=[],
-            error="OCR timeout: simulated",
-        )
-        self.assertFalse(result.succeeded)
-
-    def test_succeeded_false_when_raw_none(self):
-        from pypdftotext import PyPdfToTextConfig
-        from pypdftotext.ocr_result import OCRResult
-        result = OCRResult(pdf_name="x.pdf", config=PyPdfToTextConfig(), raw=None, pages=[])
-        self.assertFalse(result.succeeded)
-
-    def test_page_at_index_returns_page_when_present(self):
-        from azure.ai.documentintelligence.models import AnalyzeResult
-        from pypdftotext import PyPdfToTextConfig
-        from pypdftotext.ocr_result import OCRResult
-        raw = AnalyzeResult(self._fake_analyze_result_dict(num_pages=2))
-        result = OCRResult(
-            pdf_name="x.pdf", config=PyPdfToTextConfig(), raw=raw, pages=["a", "b"],
-        )
-        page = result.page_at_index(0)
-        self.assertIsNotNone(page)
-        self.assertEqual(page.page_number, 1)
-        page2 = result.page_at_index(1)
-        self.assertEqual(page2.page_number, 2)
-
-    def test_page_at_index_returns_none_when_missing(self):
-        from azure.ai.documentintelligence.models import AnalyzeResult
-        from pypdftotext import PyPdfToTextConfig
-        from pypdftotext.ocr_result import OCRResult
-        raw = AnalyzeResult(self._fake_analyze_result_dict(num_pages=1))
-        result = OCRResult(
-            pdf_name="x.pdf", config=PyPdfToTextConfig(), raw=raw, pages=["a"],
-        )
-        self.assertIsNone(result.page_at_index(99))
-
-    def test_rotation_degrees_zero_when_page_missing(self):
-        from pypdftotext import PyPdfToTextConfig
-        from pypdftotext.ocr_result import OCRResult
-        result = OCRResult(pdf_name="x.pdf", config=PyPdfToTextConfig(), raw=None, pages=[])
-        self.assertEqual(result.rotation_degrees(0), 0.0)
-
-    def test_handwritten_ratio_zero_when_no_styles(self):
-        from azure.ai.documentintelligence.models import AnalyzeResult
-        from pypdftotext import PyPdfToTextConfig
-        from pypdftotext.ocr_result import OCRResult
-        raw = AnalyzeResult(self._fake_analyze_result_dict(num_pages=1))
-        result = OCRResult(
-            pdf_name="x.pdf", config=PyPdfToTextConfig(), raw=raw, pages=["a"],
-        )
-        self.assertEqual(result.handwritten_ratio(0), 0.0)
-
-    def test_ocr_result_publicly_importable(self):
-        """OCRResult is importable from the top-level package."""
-        import pypdftotext
-        self.assertTrue(hasattr(pypdftotext, "OCRResult"))
-        from pypdftotext.ocr_result import OCRResult as _Direct
-        self.assertIs(pypdftotext.OCRResult, _Direct)
-        self.assertIn("OCRResult", pypdftotext.__all__)
-
-
 class TestOcrEndToEnd(unittest.TestCase):
     """Coverage-based: success, timeout, azure-error variants of PdfExtract.ocr."""
 
@@ -966,7 +867,7 @@ class TestOcrEndToEnd(unittest.TestCase):
         })
         pages = [f"OCR_PAGE_{i}" for i in ocr_idxs]
         return OCRResult(
-            pdf_name=extract.pdf_name, config=extract.config,
+            pdf_name=extract.pdf_name,
             raw=raw, pages=pages,
         )
 
@@ -1001,7 +902,7 @@ class TestOcrEndToEnd(unittest.TestCase):
         extract = PdfExtract(self.pdf_path.read_bytes(), config=cfg, pdf_name="t.pdf")
         extract._extracted_pages = None
         failure = OCRResult(
-            pdf_name="t.pdf", config=cfg, raw=None, pages=[],
+            pdf_name="t.pdf", raw=None, pages=[],
             error="OCR timeout: simulated for test",
         )
         mock_azure = MagicMock(name="mock_azure")
@@ -1027,7 +928,7 @@ class TestOcrEndToEnd(unittest.TestCase):
         extract = PdfExtract(self.pdf_path.read_bytes(), config=cfg, pdf_name="t.pdf")
         extract._extracted_pages = None
         failure = OCRResult(
-            pdf_name="t.pdf", config=cfg, raw=None, pages=[],
+            pdf_name="t.pdf", raw=None, pages=[],
             error="OCR failed: HttpResponseError: simulated",
         )
         mock_azure = MagicMock(name="mock_azure")

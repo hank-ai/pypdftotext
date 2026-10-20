@@ -17,6 +17,9 @@ from . import layout
 from ._cancellable_polling import CancellablePolling
 from ._config import PyPdfToTextConfig
 from .ocr_result import OCRResult
+from .ocr_result import handwritten_ratio as ocr_handwritten_ratio
+from .ocr_result import page_at_index as ocr_page_at_index
+from .ocr_result import rotation_degrees as ocr_rotation_degrees
 
 logger = logging.getLogger(__name__)
 
@@ -176,10 +179,7 @@ def await_all(
         else:
             results[name] = OCRResult(
                 pdf_name=name,
-                config=cfg,
-                raw=None,
-                pages=[],
-                error=(f"OCR batch budget exceeded after {timeout}s (pdf still pending)"),
+                error=f"OCR batch budget exceeded after {timeout}s (pdf still pending)",
             )
     return results
 
@@ -355,13 +355,7 @@ class AzureDocIntelIntegrator:
             error = error or "OCR failed: empty result (analyzeResult.pages was empty)"
         elif raw is not None:
             pages = [layout.fixed_width_page(doc_page, cfg) for doc_page in raw.pages]
-        result = OCRResult(
-            pdf_name=pdf_name,
-            config=cfg,
-            raw=raw,
-            pages=pages,
-            error=error,
-        )
+        result = OCRResult(pdf_name=pdf_name, pages=pages, error=error, raw=raw)
         # Update thread-local for back-compat consumers.
         self._thread_local.last_result = raw if raw is not None else AnalyzeResult({})
         self._thread_local.ocr_result = result
@@ -424,7 +418,9 @@ class AzureDocIntelIntegrator:
                 self.config.OCR_HANDWRITTEN_CONFIDENCE_LIMIT,
             )
         result = getattr(self._thread_local, "ocr_result", None)
-        return result.handwritten_ratio(page_index) if result is not None else 0.0
+        if result is None or result.raw is None:
+            return 0.0
+        return ocr_handwritten_ratio(result.raw, page_index, self.config)
 
     def rotation_degrees(self, page_index: int) -> float:
         """DEPRECATED. See OCRResult.rotation_degrees."""
@@ -436,7 +432,9 @@ class AzureDocIntelIntegrator:
             stacklevel=2,
         )
         result = getattr(self._thread_local, "ocr_result", None)
-        return result.rotation_degrees(page_index) if result is not None else 0.0
+        if result is None or result.raw is None:
+            return 0.0
+        return ocr_rotation_degrees(result.raw, page_index, self.config)
 
     def page_at_index(self, page_index: int) -> DocumentPage | None:
         """DEPRECATED. See OCRResult.page_at_index."""
@@ -448,7 +446,9 @@ class AzureDocIntelIntegrator:
             stacklevel=2,
         )
         result = getattr(self._thread_local, "ocr_result", None)
-        return result.page_at_index(page_index) if result is not None else None
+        if result is None or result.raw is None:
+            return None
+        return ocr_page_at_index(result.raw, page_index)
 
 
 AZURE_READ = AzureDocIntelIntegrator()

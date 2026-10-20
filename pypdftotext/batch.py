@@ -236,9 +236,6 @@ class PdfExtractBatch:
                 extract._apply_ocr_result(
                     OCRResult(
                         pdf_name=pdf_name,
-                        config=self.config,
-                        raw=None,
-                        pages=[],
                         error="OCR failed: no client available "
                         "(check AZURE_DOCINTEL_ENDPOINT and AZURE_DOCINTEL_SUBSCRIPTION_KEY)",
                     )

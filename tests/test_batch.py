@@ -164,7 +164,7 @@ class TestPdfExtractBatch(unittest.TestCase):
             })
             return {
                 "all70th": OCRResult(
-                    pdf_name="all70th", config=config or ocr_config,
+                    pdf_name="all70th",
                     raw=raw,
                     pages=expected_pages[:n_ocr],
                     error=None,
@@ -230,7 +230,7 @@ class TestPdfExtractBatch(unittest.TestCase):
                     "styles": [],
                 })
                 results[name] = OCRResult(
-                    pdf_name=name, config=config or ocr_config,
+                    pdf_name=name,
                     raw=raw,
                     pages=["OCR text"] * len(extract.ocr_page_idxs),
                     error=None,
@@ -271,7 +271,7 @@ class TestPdfExtractBatch(unittest.TestCase):
             # Simulate Azure API error returned as an OCRResult with error set
             return {
                 name: OCRResult(
-                    pdf_name=name, config=config or ocr_config,
+                    pdf_name=name,
                     raw=None, pages=[],
                     error="OCR failed: Azure API Error",
                 )
@@ -409,7 +409,7 @@ class TestPerformBatchOcrSubmitAndAwait(unittest.TestCase):
         def fake_await_all(pollers, integrator, timeout, *, config=None):
             return {
                 name: OCRResult(
-                    pdf_name=name, config=config or self.cfg,
+                    pdf_name=name,
                     raw=self._make_raw(batch.pdf_extracts[name]),
                     pages=["OCR_TEXT"] * len(batch.pdf_extracts[name].ocr_page_idxs),
                     error=None,
@@ -446,12 +446,12 @@ class TestPerformBatchOcrSubmitAndAwait(unittest.TestCase):
             good_pages = ["OCR_GOOD"] * len(good_extract.ocr_page_idxs)
             return {
                 "good": OCRResult(
-                    pdf_name="good", config=config or self.cfg,
+                    pdf_name="good",
                     raw=self._make_raw(good_extract),
                     pages=good_pages, error=None,
                 ),
                 "bad": OCRResult(
-                    pdf_name="bad", config=config or self.cfg, raw=None,
+                    pdf_name="bad", raw=None,
                     pages=[], error="OCR timeout: simulated",
                 ),
             }

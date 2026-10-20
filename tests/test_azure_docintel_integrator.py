@@ -7,6 +7,7 @@ import warnings
 from unittest.mock import MagicMock, patch
 
 from pypdftotext import PyPdfToTextConfig
+from pypdftotext.ocr_result import handwritten_ratio, page_at_index, rotation_degrees
 from pypdftotext.azure_docintel_integrator import (
     AzureDocIntelIntegrator,
     AZURE_READ,
@@ -255,14 +256,14 @@ class TestDeprecatedSurface(unittest.TestCase):
         self.assertEqual(len(caught), 1)
         self.assertEqual(caught[0].category, DeprecationWarning)
         # Value matches OCRResult.
-        self.assertEqual(integrator_value, result.handwritten_ratio(0))
+        self.assertEqual(integrator_value, handwritten_ratio(result.raw, 0, self.cfg))
 
     def test_rotation_degrees_back_compat(self):
         integrator = AzureDocIntelIntegrator(self.cfg)
         result, _ = self._run_one_ocr(integrator)
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
-            self.assertEqual(integrator.rotation_degrees(0), result.rotation_degrees(0))
+            self.assertEqual(integrator.rotation_degrees(0), rotation_degrees(result.raw, 0, self.cfg))
         self.assertEqual(caught[0].category, DeprecationWarning)
 
     def test_page_at_index_back_compat(self):
@@ -270,7 +271,7 @@ class TestDeprecatedSurface(unittest.TestCase):
         result, _ = self._run_one_ocr(integrator)
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
-            self.assertIs(integrator.page_at_index(0), result.page_at_index(0))
+            self.assertIs(integrator.page_at_index(0), page_at_index(result.raw, 0))
         self.assertEqual(caught[0].category, DeprecationWarning)
 
     def test_reset_clears_thread_local_with_warning(self):
