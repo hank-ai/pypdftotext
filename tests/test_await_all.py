@@ -314,6 +314,28 @@ class TestIterResults(unittest.TestCase):
         self.assertEqual(out["bad"].error, "OCR failed: RuntimeError: renderer exploded")
         self.assertTrue(out["good"].succeeded)
 
+    def test_iter_results_expired_poller_keeps_real_error_over_timeout_label(self):
+        """When the grace harvest of an expired poller yields a real (non-timeout)
+        error, that error is reported, not relabeled as a timeout."""
+        from azure.core.exceptions import HttpResponseError
+
+        now = time.monotonic()
+        raising = _fake_poller(immediate_result=None, fire_callbacks=False)
+        raising.result.side_effect = RuntimeError("renderer exploded")
+        azure_failed = _fake_poller(immediate_result=None, fire_callbacks=False)
+        azure_failed.result.side_effect = HttpResponseError("server said no")
+        silent = _fake_poller(immediate_result=None, fire_callbacks=False)  # result() -> None
+        out = dict(iter_results(
+            {"raising": raising, "azure_failed": azure_failed, "silent": silent},
+            self.integrator, config=self.cfg,
+            submitted_at={n: now - 100.0 for n in ("raising", "azure_failed", "silent")},
+        ))
+        self.assertEqual(out["raising"].error, "OCR failed: RuntimeError: renderer exploded")
+        self.assertTrue(out["azure_failed"].error.startswith("OCR failed: HttpResponseError"))
+        self.assertEqual(
+            out["silent"].error, "OCR timeout: no result within AZURE_DOCINTEL_TIMEOUT=60s"
+        )
+
     def test_iter_results_callback_does_not_call_result(self):
         """Regression: the done-callback must only enqueue; poller.result() runs on the
         coordinator thread. Mirrors TestAwaitAllThreadSafety for iter_results."""

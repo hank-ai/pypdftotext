@@ -176,6 +176,18 @@ class TestAwaitOne(unittest.TestCase):
         AzureDocIntelIntegrator(self.cfg).await_one(poller, pdf_name="x.pdf", timeout=2.5)
         poller.result.assert_called_once_with(2.5)
 
+    def test_await_one_timeout_message_reports_effective_timeout(self):
+        """The silent-None timeout message cites the timeout actually used, not the
+        config default, when a caller supplies timeout=."""
+        poller = MagicMock(name="poller")
+        poller.result.return_value = None
+        poller._polling_method = MagicMock()
+        poller._polling_method.cancel_event = threading.Event()
+        result = AzureDocIntelIntegrator(self.cfg).await_one(poller, pdf_name="x.pdf", timeout=2.5)
+        self.assertEqual(
+            result.error, "OCR timeout: poller returned no analyzeResult after 2.5s"
+        )
+
     def test_await_one_error_paths(self):
         """Parametrized: HttpResponseError and empty-pages produce OCRResult.error."""
         from azure.core.exceptions import HttpResponseError

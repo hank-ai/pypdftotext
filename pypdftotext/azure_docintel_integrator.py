@@ -177,7 +177,12 @@ def iter_results(
         result = _await(
             pollers.pop(name), name, timeout=max(0.0, grace_deadline - time.monotonic())
         )
-        if result.succeeded:
+        # Only the silent-None timeout from the grace join gets relabeled with the
+        # expiry reason. A real Azure failure, an empty result, or a harvest
+        # exception that landed in the race window is reported as itself.
+        if result.succeeded or (
+            result.error is not None and not result.error.startswith("OCR timeout:")
+        ):
             return result
         if batch_expired:
             error = f"OCR batch budget exceeded after {batch_timeout}s (pdf still pending)"
@@ -348,8 +353,9 @@ class AzureDocIntelIntegrator:
         prefix = f"[{pdf_name}] " if pdf_name else ""
         raw: AnalyzeResult | None
         error: str | None = None
+        effective_timeout = timeout if timeout is not None else cfg.AZURE_DOCINTEL_TIMEOUT
         try:
-            raw = poller.result(timeout if timeout is not None else cfg.AZURE_DOCINTEL_TIMEOUT)
+            raw = poller.result(effective_timeout)
         except HttpResponseError as e:
             raw = None
             error = f"OCR failed: HttpResponseError: {e}"
@@ -358,10 +364,7 @@ class AzureDocIntelIntegrator:
             error = f"OCR failed: {type(e).__name__}: {e}"
         if raw is None and error is None:
             # poller.result returned None — the timeout-without-exception case.
-            error = (
-                f"OCR timeout: poller returned no analyzeResult after "
-                f"{cfg.AZURE_DOCINTEL_TIMEOUT}s"
-            )
+            error = f"OCR timeout: poller returned no analyzeResult after {effective_timeout}s"
         if error is not None:
             # Signal the daemon poll thread to exit. Best-effort: not all
             # mocked pollers have a CancellablePolling, so guard the access.
