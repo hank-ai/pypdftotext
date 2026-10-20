@@ -401,7 +401,8 @@ class TestPdfExtract(unittest.TestCase):
                 for page in pdf.extracted_pages:
                     self.assertEqual(page.source, "OCR")
                     # Azure page should be set for OCR'd pages
-                    self.assertIsNotNone(page.azure_page)
+                    # azure_page is retained only when debug_path is set
+                    self.assertIsNone(page.azure_page)
 
                 # The module-level helpers read the same AnalyzeResult that was
                 # applied to the extract; per-page values must agree.
@@ -505,7 +506,8 @@ class TestPdfExtract(unittest.TestCase):
                 # Verify the extracted pages have correct rotation info and source
                 for page in pdf.extracted_pages:
                     self.assertEqual(page.source, "OCR")
-                    self.assertIsNotNone(page.azure_page)
+                    # azure_page is retained only when debug_path is set
+                    self.assertIsNone(page.azure_page)
 
     def test_compress_images(self):
         """Test image compression reduces PDF size appropriately."""
@@ -892,6 +894,52 @@ class TestOcrEndToEnd(unittest.TestCase):
             self.assertEqual(extract.extracted_pages[idx].source, "OCR")
             self.assertTrue(extract.extracted_pages[idx].text.startswith("OCR_PAGE_"))
             self.assertIsNone(extract.extracted_pages[idx].ocr_error)
+
+    def test_apply_drops_raw_and_azure_page_without_debug_path(self):
+        """Without debug_path, the parsed AnalyzeResult and per-page DocumentPage are released."""
+        from pypdftotext.pdf_extract import PdfExtract
+        from unittest.mock import patch, MagicMock
+        cfg = PyPdfToTextConfig(base=self.cfg, overrides={"SUPPRESS_EMBEDDED_TEXT": True})
+        extract = PdfExtract(self.pdf_path.read_bytes(), config=cfg, pdf_name="t.pdf")
+        extract._extracted_pages = None
+        mock_azure = MagicMock(name="mock_azure")
+        mock_azure.submit.return_value = MagicMock(name="poller")
+        mock_azure.await_one.side_effect = lambda p, **kw: self._build_success_ocr_result(extract)
+        with patch("pypdftotext.pdf_extract.AZURE_READ", mock_azure):
+            _ = extract.extracted_pages
+        self.assertTrue(extract.ocr_result.succeeded)
+        self.assertIsNone(extract.ocr_result.raw)
+        for idx in extract.ocr_page_idxs:
+            self.assertIsNone(extract.extracted_pages[idx].azure_page)
+            self.assertEqual(extract.extracted_pages[idx].source, "OCR")
+
+    def test_apply_retains_raw_and_azure_page_with_debug_path(self):
+        """With debug_path, raw and azure_page are kept and the debug files are written."""
+        import tempfile
+        from pypdftotext.pdf_extract import PdfExtract
+        from unittest.mock import patch, MagicMock
+        cfg = PyPdfToTextConfig(base=self.cfg, overrides={"SUPPRESS_EMBEDDED_TEXT": True})
+        with tempfile.TemporaryDirectory() as tmp:
+            debug_path = Path(tmp)
+            extract = PdfExtract(
+                self.pdf_path.read_bytes(), config=cfg, pdf_name="t.pdf", debug_path=debug_path
+            )
+            extract._extracted_pages = None
+            mock_azure = MagicMock(name="mock_azure")
+            mock_azure.submit.return_value = MagicMock(name="poller")
+            mock_azure.await_one.side_effect = (
+                lambda p, **kw: self._build_success_ocr_result(extract)
+            )
+            with patch("pypdftotext.pdf_extract.AZURE_READ", mock_azure):
+                _ = extract.extracted_pages
+            self.assertIsNotNone(extract.ocr_result.raw)
+            for idx in extract.ocr_page_idxs:
+                page = extract.extracted_pages[idx]
+                self.assertIsNotNone(page.azure_page)
+                self.assertEqual(page.azure_page.page_number, idx + 1)
+            self.assertTrue((debug_path / "azure.json").exists())
+            self.assertTrue((debug_path / "azure_content.txt").exists())
+            self.assertTrue((debug_path / "ocr_pages.json").exists())
 
     def test_ocr_end_to_end_failure_sets_ocr_error(self):
         """Mocked azure returns OCRResult with error; ExtractedPages get ocr_error."""
