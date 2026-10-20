@@ -4,12 +4,11 @@ import io
 import logging
 import os
 import threading
-import warnings
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 
 from azure.ai.documentintelligence import AnalyzeDocumentLROPoller, DocumentIntelligenceClient
-from azure.ai.documentintelligence.models import AnalyzeResult, DocumentPage
+from azure.ai.documentintelligence.models import AnalyzeResult
 from azure.core.credentials import AzureKeyCredential
 from azure.core.exceptions import AzureError, HttpResponseError
 
@@ -17,9 +16,6 @@ from . import layout
 from ._cancellable_polling import CancellablePolling
 from ._config import PyPdfToTextConfig
 from .ocr_result import OCRResult
-from .ocr_result import handwritten_ratio as ocr_handwritten_ratio
-from .ocr_result import page_at_index as ocr_page_at_index
-from .ocr_result import rotation_degrees as ocr_rotation_degrees
 
 logger = logging.getLogger(__name__)
 
@@ -117,9 +113,7 @@ def await_all(
     Args:
         pollers: dict mapping pdf_name to poller.
         integrator: the integrator whose await_one is used during the
-            harvest phase. Its ``_thread_local`` is updated for the LAST
-            harvest to complete (matches the "undefined in batch context"
-            semantics for AZURE_READ.last_result).
+            harvest phase.
         timeout: overall budget in seconds. None means wait indefinitely.
         config: optional per-batch config override for ``await_one``.
 
@@ -192,44 +186,6 @@ class AzureDocIntelIntegrator:
 
     config: PyPdfToTextConfig = field(default_factory=PyPdfToTextConfig)
     client: DocumentIntelligenceClient | None = field(default=None, init=False, repr=False)
-    _thread_local: threading.local = field(
-        default_factory=threading.local,
-        init=False,
-        repr=False,
-    )
-
-    def reset(self):
-        """DEPRECATED. Clear the thread-local last_result.
-
-        Replaced by allowing OCRResult instances to manage their own
-        lifetime; no explicit reset is needed in the new API.
-        """
-        warnings.warn(
-            "AzureDocIntelIntegrator.reset is deprecated; OCRResult instances "
-            "manage their own lifetime. This call clears the thread-local "
-            "back-compat slot.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        self._thread_local.last_result = AnalyzeResult({})
-        self._thread_local.ocr_result = None
-
-    @property
-    def last_result(self) -> AnalyzeResult:
-        """DEPRECATED. The raw AnalyzeResult from this thread's most recent
-        await_one call, or AnalyzeResult({}) if no OCR has run on this thread.
-
-        Replaced by ``PdfExtract.ocr_result.raw`` (or ``OCRResult.raw``).
-        Will be removed in a future minor release.
-        """
-        warnings.warn(
-            "AzureDocIntelIntegrator.last_result is deprecated and will be "
-            "removed in a future release. Use PdfExtract.ocr_result.raw or "
-            "OCRResult.raw instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        return getattr(self._thread_local, "last_result", AnalyzeResult({}))
 
     def create_client(self) -> bool:
         """Create or retrieve the cached DocumentIntelligenceClient.
@@ -312,9 +268,6 @@ class AzureDocIntelIntegrator:
         OCRResult carries error=str when the wait timed out, the SDK raised
         an AzureError, or the result had zero pages.
 
-        Updates ``self._thread_local`` for deprecated callers of
-        ``self.last_result`` / ``self.handwritten_ratio`` / etc.
-
         Args:
             poller: poller previously returned by ``self.submit``.
             pdf_name: identifier for log correlation; carried into the
@@ -356,9 +309,6 @@ class AzureDocIntelIntegrator:
         elif raw is not None:
             pages = [layout.fixed_width_page(doc_page, cfg) for doc_page in raw.pages]
         result = OCRResult(pdf_name=pdf_name, pages=pages, error=error, raw=raw)
-        # Update thread-local for back-compat consumers.
-        self._thread_local.last_result = raw if raw is not None else AnalyzeResult({})
-        self._thread_local.ocr_result = result
         if result.succeeded:
             logger.info(
                 "%sOCR completed: %d pages rendered.",
@@ -390,65 +340,6 @@ class AzureDocIntelIntegrator:
             return []
         result = self.await_one(poller, pdf_name=pdf_name)
         return result.pages
-
-    def handwritten_ratio(
-        self,
-        page_index: int,
-        handwritten_confidence_limit: float | None = None,
-    ) -> float:
-        """DEPRECATED. Returns the handwritten ratio for the given page from
-        this thread's most-recent OCR result.
-
-        Replaced by ``OCRResult.handwritten_ratio(page_index)`` (or
-        ``PdfExtract.ocr_result.handwritten_ratio(page_index)``).
-        """
-        warnings.warn(
-            "AzureDocIntelIntegrator.handwritten_ratio is deprecated. Use "
-            "OCRResult.handwritten_ratio (e.g. via PdfExtract.ocr_result) "
-            "instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        if handwritten_confidence_limit is not None:
-            logger.warning(
-                "handwritten_confidence_limit arg is no longer supported; "
-                "set config.OCR_HANDWRITTEN_CONFIDENCE_LIMIT instead. "
-                "(requested=%.2f, effective=%.2f)",
-                handwritten_confidence_limit,
-                self.config.OCR_HANDWRITTEN_CONFIDENCE_LIMIT,
-            )
-        result = getattr(self._thread_local, "ocr_result", None)
-        if result is None or result.raw is None:
-            return 0.0
-        return ocr_handwritten_ratio(result.raw, page_index, self.config)
-
-    def rotation_degrees(self, page_index: int) -> float:
-        """DEPRECATED. See OCRResult.rotation_degrees."""
-        warnings.warn(
-            "AzureDocIntelIntegrator.rotation_degrees is deprecated. Use "
-            "OCRResult.rotation_degrees (e.g. via PdfExtract.ocr_result) "
-            "instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        result = getattr(self._thread_local, "ocr_result", None)
-        if result is None or result.raw is None:
-            return 0.0
-        return ocr_rotation_degrees(result.raw, page_index, self.config)
-
-    def page_at_index(self, page_index: int) -> DocumentPage | None:
-        """DEPRECATED. See OCRResult.page_at_index."""
-        warnings.warn(
-            "AzureDocIntelIntegrator.page_at_index is deprecated. Use "
-            "OCRResult.page_at_index (e.g. via PdfExtract.ocr_result) "
-            "instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        result = getattr(self._thread_local, "ocr_result", None)
-        if result is None or result.raw is None:
-            return None
-        return ocr_page_at_index(result.raw, page_index)
 
 
 AZURE_READ = AzureDocIntelIntegrator()

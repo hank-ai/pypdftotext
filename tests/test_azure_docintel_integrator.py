@@ -3,11 +3,9 @@
 import os
 import threading
 import unittest
-import warnings
 from unittest.mock import MagicMock, patch
 
 from pypdftotext import PyPdfToTextConfig
-from pypdftotext.ocr_result import handwritten_ratio, page_at_index, rotation_degrees
 from pypdftotext.azure_docintel_integrator import (
     AzureDocIntelIntegrator,
     AZURE_READ,
@@ -200,141 +198,20 @@ class TestAwaitOne(unittest.TestCase):
         self.assertEqual(result_empty.error, "OCR failed: empty result (analyzeResult.pages was empty)")
 
 
-class TestDeprecatedSurface(unittest.TestCase):
+class TestNoDeprecatedSurface(unittest.TestCase):
     def setUp(self):
-        with _client_cache_lock:
-            _client_cache.clear()
         self.cfg = PyPdfToTextConfig(overrides={
             "AZURE_DOCINTEL_ENDPOINT": "https://x.example",
             "AZURE_DOCINTEL_SUBSCRIPTION_KEY": "key",
         })
 
-    def _run_one_ocr(self, integrator):
-        """Helper: run a fake successful OCR so thread-local is populated."""
-        from azure.ai.documentintelligence.models import AnalyzeResult
-        raw = AnalyzeResult({
-            "apiVersion": "2024-11-30", "modelId": "prebuilt-read",
-            "stringIndexType": "textElements", "content": "page1",
-            "pages": [{"pageNumber": 1, "angle": 0.0, "width": 8.5, "height": 11.0,
-                       "unit": "inch", "spans": [{"offset": 0, "length": 5}],
-                       "words": [], "lines": [], "selectionMarks": []}],
-            "styles": [],
-        })
-        poller = MagicMock()
-        poller.result.return_value = raw
-        return integrator.await_one(poller, pdf_name="x.pdf"), raw
-
-    def test_last_result_emits_deprecation_warning(self):
+    def test_deprecated_members_removed(self):
+        """reset / last_result / handwritten_ratio / rotation_degrees / page_at_index
+        and the thread-local that backed them are gone."""
         integrator = AzureDocIntelIntegrator(self.cfg)
-        _, raw = self._run_one_ocr(integrator)
-        with warnings.catch_warnings(record=True) as caught:
-            warnings.simplefilter("always")
-            value = integrator.last_result
-        self.assertEqual(len(caught), 1)
-        self.assertEqual(caught[0].category, DeprecationWarning)
-        self.assertIs(value, raw)
-
-    def test_last_result_default_when_no_ocr_on_thread(self):
-        """Accessing last_result before any OCR on this thread returns the
-        empty AnalyzeResult sentinel (back-compat with the original init)."""
-        from azure.ai.documentintelligence.models import AnalyzeResult
-        integrator = AzureDocIntelIntegrator(self.cfg)
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", DeprecationWarning)
-            value = integrator.last_result
-        self.assertIsInstance(value, AnalyzeResult)
-        self.assertIsNone(value.pages)  # AnalyzeResult({}).pages is None.
-
-    def test_handwritten_ratio_back_compat(self):
-        """Deprecated wrapper returns the same value as OCRResult.handwritten_ratio."""
-        integrator = AzureDocIntelIntegrator(self.cfg)
-        result, _ = self._run_one_ocr(integrator)
-        with warnings.catch_warnings(record=True) as caught:
-            warnings.simplefilter("always")
-            integrator_value = integrator.handwritten_ratio(0)
-        # Warning emitted.
-        self.assertEqual(len(caught), 1)
-        self.assertEqual(caught[0].category, DeprecationWarning)
-        # Value matches OCRResult.
-        self.assertEqual(integrator_value, handwritten_ratio(result.raw, 0, self.cfg))
-
-    def test_rotation_degrees_back_compat(self):
-        integrator = AzureDocIntelIntegrator(self.cfg)
-        result, _ = self._run_one_ocr(integrator)
-        with warnings.catch_warnings(record=True) as caught:
-            warnings.simplefilter("always")
-            self.assertEqual(integrator.rotation_degrees(0), rotation_degrees(result.raw, 0, self.cfg))
-        self.assertEqual(caught[0].category, DeprecationWarning)
-
-    def test_page_at_index_back_compat(self):
-        integrator = AzureDocIntelIntegrator(self.cfg)
-        result, _ = self._run_one_ocr(integrator)
-        with warnings.catch_warnings(record=True) as caught:
-            warnings.simplefilter("always")
-            self.assertIs(integrator.page_at_index(0), page_at_index(result.raw, 0))
-        self.assertEqual(caught[0].category, DeprecationWarning)
-
-    def test_reset_clears_thread_local_with_warning(self):
-        from azure.ai.documentintelligence.models import AnalyzeResult
-        integrator = AzureDocIntelIntegrator(self.cfg)
-        self._run_one_ocr(integrator)
-        with warnings.catch_warnings(record=True) as caught:
-            warnings.simplefilter("always")
-            integrator.reset()
-        self.assertEqual(caught[0].category, DeprecationWarning)
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", DeprecationWarning)
-            self.assertIsNone(integrator.last_result.pages)  # back to empty sentinel
-
-
-class TestThreadLocalIsolation(unittest.TestCase):
-    def setUp(self):
-        with _client_cache_lock:
-            _client_cache.clear()
-
-    def test_thread_local_isolation_across_threads(self):
-        """REGRESSION (P4): two threads sharing one integrator each see their
-        own most-recent OCR result, not each other's."""
-        from azure.ai.documentintelligence.models import AnalyzeResult
-
-        def make_raw(label):
-            return AnalyzeResult({
-                "apiVersion": "2024-11-30", "modelId": "prebuilt-read",
-                "stringIndexType": "textElements", "content": label,
-                "pages": [{"pageNumber": 1, "angle": 0.0, "width": 8.5,
-                           "height": 11.0, "unit": "inch",
-                           "spans": [{"offset": 0, "length": len(label)}],
-                           "words": [], "lines": [], "selectionMarks": []}],
-                "styles": [],
-            })
-
-        cfg = PyPdfToTextConfig(overrides={
-            "AZURE_DOCINTEL_ENDPOINT": "https://x.example",
-            "AZURE_DOCINTEL_SUBSCRIPTION_KEY": "key",
-        })
-        integrator = AzureDocIntelIntegrator(cfg)
-        results = {}
-
-        def worker(label):
-            poller = MagicMock()
-            poller.result.return_value = make_raw(label)
-            integrator.await_one(poller, pdf_name=label)
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore", DeprecationWarning)
-                results[label] = integrator.last_result.content
-
-        threads = [
-            threading.Thread(target=worker, args=("alpha",)),
-            threading.Thread(target=worker, args=("bravo",)),
-        ]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join()
-
-        # Each thread saw its own label, not the other's.
-        self.assertEqual(results["alpha"], "alpha")
-        self.assertEqual(results["bravo"], "bravo")
+        for name in ("reset", "last_result", "handwritten_ratio", "rotation_degrees",
+                     "page_at_index", "_thread_local"):
+            self.assertFalse(hasattr(integrator, name), name)
 
 
 if __name__ == "__main__":
