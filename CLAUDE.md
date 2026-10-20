@@ -74,16 +74,17 @@ pip install -e ".[dev]"  # All of the above + pytest, pytest-cov, and type stubs
    - `handwritten_ratio(page_index)` returns the handwritten ratio for a given page (method, not module-level function)
    - Implements corruption detection and recovery
    - Coordinates batch OCR submission for efficiency
+   - `ocr_result: OCRResult | None` is set after OCR; its `raw` `AnalyzeResult` and every `ExtractedPage.azure_page` are released unless `debug_path` is set (the parsed result is ~5x its JSON size and nothing reads it after apply)
 
 4. **Extracted Page** (`extracted_page.py`):
    - `ExtractedPage` dataclass tracks page metadata and source (embedded/OCR)
+   - `azure_page` is populated only when the owning `PdfExtract` has a `debug_path`
 
-5. **Azure OCR Integration** (`azure_docintel_integrator.py`):
-   - `AzureDocIntelIntegrator` class manages Azure Document Intelligence API
-   - Singleton pattern with lazy client initialization
-   - Handles client creation, PDF submission, and result processing
-   - Supports handwritten text detection and confidence scoring
-   - Manages OCR result caching and page mapping
+5. **Azure OCR Integration** (`azure_docintel_integrator.py`, `ocr_result.py`):
+   - `AzureDocIntelIntegrator.submit()` returns an Azure poller; `await_one()` turns a poller into an `OCRResult`
+   - Module-level `iter_results()` streams `(pdf_name, OCRResult)` in completion order, popping each poller as it is harvested. Per-PDF deadline is `AZURE_DOCINTEL_TIMEOUT` anchored at submit time; `AZURE_DOCINTEL_BATCH_TIMEOUT` (default `None`) optionally bounds the whole batch. Expired pollers are cancelled together and joined against one shared 5-second grace budget per expiry pass (so an Azure outage winds down in seconds, not seconds-per-PDF). A non-Azure exception while harvesting one PDF becomes that PDF's error result and the stream continues. `await_all()` is a dict-collecting wrapper.
+   - `DocumentIntelligenceClient` instances are cached by credentials in `client_for()`; the integrator keeps no per-call or per-thread result state
+   - `ocr_result.py` holds the `OCRResult` transport dataclass (`pdf_name`, `pages`, `error`, `raw`) and the module functions `page_at_index`, `rotation_degrees`, `handwritten_ratio`, which take an `AnalyzeResult` explicitly
 
 6. **Layout Processing** (`layout.py`):
    - Handles fixed-width text layout generation from Azure OCR results
@@ -92,7 +93,7 @@ pip install -e ".[dev]"  # All of the above + pytest, pytest-cov, and type stubs
    - Implements configurable scaling for coordinate systems
 
 7. **Batch Processing** (`batch.py`):
-   - `PdfExtractBatch` for submitting multiple PDFs to Azure OCR in a single API call
+   - `PdfExtractBatch` submits every OCR-eligible PDF (one Azure request each), then applies each result as its poller completes (streaming, bounded peak memory)
    - `config` param accepts `PyPdfToTextConfig`, a dict of overrides, or `None` (same as `PdfExtract`)
 
 8. **Header/Footer Detection** (`header_footer_detection.py`, `page_fingerprint.py`):
@@ -105,7 +106,7 @@ pip install -e ".[dev]"  # All of the above + pytest, pytest-cov, and type stubs
 - **Lazy Initialization**: Azure OCR client created only when needed
 - **Fallback Strategy**: Attempts embedded text extraction first, falls back to OCR based on configurable thresholds
 - **Corruption Detection**: Validates extracted text length against `MAX_CHARS_PER_PDF_PAGE` to detect malformed PDFs
-- **Batch OCR**: Collects all pages needing OCR and processes them in a single API call for efficiency
+- **Batch OCR**: Submits one Azure request per PDF needing OCR, then harvests and applies results as they complete via `iter_results()`
 - **Progress Tracking**: Uses tqdm for visual progress feedback (can be disabled for logging environments)
 - **Configuration Inheritance**: Settings can be layered via base configs and overrides
 
@@ -162,7 +163,8 @@ These can also be set programmatically after import via the `constants` global s
 
 ### Thread Safety
 
-- The current implementation uses a singleton Azure client - consider thread safety when implementing concurrent processing
+- `AzureDocIntelIntegrator` keeps no per-call state; `DocumentIntelligenceClient` instances are cached by credentials in `client_for()`
+- Azure poller done-callbacks run on the SDK's daemon polling thread and must only enqueue; calling `poller.result()` there raises `RuntimeError: cannot join current thread`. Harvesting (and `_apply_ocr_result`) happens on the coordinator thread.
 - `PdfReader` (and the `reader` property) is NOT thread safe — avoid triggering lazy reader init from multiple threads
 - `pdf_name` derivation avoids triggering lazy reader init for bytes/BytesIO inputs for this reason
 - Progress bars support positioning for multi-threaded scenarios via `pbar_position`

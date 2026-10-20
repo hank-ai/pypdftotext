@@ -16,11 +16,11 @@ from pypdf.errors import DependencyError
 from pypdf.generic import DictionaryObject, NullObject
 from tqdm import tqdm
 
+from . import ocr_result
 from ._config import PyPdfToTextConfig, PyPdfToTextConfigOverrides
 from .azure_docintel_integrator import AZURE_READ, AzureDocIntelIntegrator
 from .extracted_page import ExtractedPage
 from .header_footer_detection import assign_headers_and_footers
-from .ocr_result import OCRResult
 
 try:
     import boto3
@@ -106,7 +106,7 @@ class PdfExtract:
         self._azure: AzureDocIntelIntegrator | None = kwargs.get("azure")
         self._batch_mode: bool = kwargs.get("_batch_mode", False)
         self.ocr_page_idxs: list[int] = []
-        self.ocr_result: OCRResult | None = None  # set by ocr() if OCR runs
+        self.ocr_result: ocr_result.OCRResult | None = None  # set by ocr() if OCR runs
         self._reader: PdfReader | None = None
         self._writer: PdfWriter | None = None
         self._pbar: tqdm | None = None
@@ -357,25 +357,31 @@ class PdfExtract:
         result = azure.await_one(poller, pdf_name=self.pdf_name, config=self.config)
         self._apply_ocr_result(result)
 
-    def _apply_ocr_result(self, result: OCRResult) -> None:
+    def _apply_ocr_result(self, result: ocr_result.OCRResult) -> None:
         """Apply an OCRResult to self.extracted_pages.
 
         On success: each ocr_page_idx page gets its rendered text,
-        source="OCR", handwritten_ratio, and azure_page populated; rotations
-        are applied where Azure reports non-zero angles.
+        source="OCR", and handwritten_ratio populated; rotations are applied
+        where Azure reports non-zero angles.
 
         On failure: every ocr_page_idx page gets ocr_error set; text stays
         empty, source stays "embedded", azure_page stays None.
 
         In both cases self.ocr_result is stashed for downstream introspection.
+        The parsed ``AnalyzeResult`` (``result.raw``) and each page's
+        ``azure_page`` are retained only when ``self.debug_path`` is set;
+        otherwise ``raw`` is released after the debug writes would have run,
+        because it is several times the size of the rendered text and nothing
+        reads it after apply.
         """
         self.ocr_result = result
         rotated_pages = False
-        if not result.succeeded:
+        if not result.succeeded or result.raw is None:
             logger.error("[%s] OCR did not complete: %s", self.pdf_name, result.error)
             for og_pg_idx in self.ocr_page_idxs:
                 self.extracted_pages[og_pg_idx].ocr_error = result.error
             return
+        raw = result.raw
         replacements = (
             [
                 (old_bytes.decode(), new_bytes.decode())
@@ -397,7 +403,7 @@ class PdfExtract:
                     self.config.MAX_CHARS_PER_PDF_PAGE,
                 )
                 txt = ""
-            elif rotation := result.rotation_degrees(og_pg_idx):
+            elif rotation := ocr_result.rotation_degrees(raw, og_pg_idx, self.config):
                 if applied_rotation := -90 * int(round(rotation / 90.0)):
                     rotated_pages = True
                     ext_pg.page_obj.rotation += applied_rotation
@@ -406,8 +412,10 @@ class PdfExtract:
                     txt = txt.replace(old_, new_)
             ext_pg.text = txt
             ext_pg.source = "OCR"
-            ext_pg.handwritten_ratio = result.handwritten_ratio(og_pg_idx)
-            ext_pg.azure_page = result.page_at_index(og_pg_idx)
+            ext_pg.handwritten_ratio = ocr_result.handwritten_ratio(raw, og_pg_idx, self.config)
+            ext_pg.azure_page = (
+                ocr_result.page_at_index(raw, og_pg_idx) if self.debug_path else None
+            )
             ext_pg.ocr_error = None
         if rotated_pages:
             logger.debug("[%s] Regenerating body with corrected page orientations.", self.pdf_name)
@@ -426,6 +434,10 @@ class PdfExtract:
                     self.ocr_result.raw.content or "",
                     "utf-8",
                 )
+        if not self.debug_path:
+            # Release the parsed AnalyzeResult: everything apply needs from it
+            # has been copied onto the ExtractedPages above.
+            result.raw = None
 
     @overload
     def remove_pages(self, remove: Callable[[ExtractedPage], bool], raise_on_empty: bool = True):

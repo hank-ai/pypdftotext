@@ -27,8 +27,9 @@ class ExtractedPage:
         text: The extracted text content from the page. Excludes header and footer.
         source: Indicates whether text was extracted from embedded PDF content \
             ("embedded") or via OCR ("OCR").
-        azure_page: The Azure DocumentPage instance if this page was OCR'd,
-            None for embedded text pages.
+        azure_page: The Azure DocumentPage for this page when it was OCR'd AND the \
+            owning PdfExtract has a ``debug_path``; otherwise None. Released by \
+            default because the parsed Azure result dominates steady-state memory.
         document_idx: An integer representing the ancestry of the page. Pages \
             with a common document_idx likely originated from the same source. \
             Used for header/footer detection. Default is 0. Calling the \

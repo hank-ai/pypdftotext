@@ -3,13 +3,14 @@
 import io
 import logging
 import os
+import queue
 import threading
-import warnings
-from collections.abc import Mapping
+import time
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, field
 
 from azure.ai.documentintelligence import AnalyzeDocumentLROPoller, DocumentIntelligenceClient
-from azure.ai.documentintelligence.models import AnalyzeResult, DocumentPage
+from azure.ai.documentintelligence.models import AnalyzeResult
 from azure.core.credentials import AzureKeyCredential
 from azure.core.exceptions import AzureError, HttpResponseError
 
@@ -82,106 +83,167 @@ def client_for(config: PyPdfToTextConfig) -> DocumentIntelligenceClient | None:
         return client
 
 
-_BUDGET_GRACE_SECONDS: float = 5.0
-"""How long await_all waits after signalling cancellation for late callbacks
-to fire before synthesizing 'budget exceeded' results. Internal tuning
-constant; not configurable."""
+_CANCEL_GRACE_SECONDS: float = 5.0
+"""How long a cancelled poller's thread is joined during harvest before its
+result is treated as missing. Internal tuning constant; not configurable."""
+
+
+def iter_results(
+    pollers: dict[str, AnalyzeDocumentLROPoller],
+    integrator: "AzureDocIntelIntegrator",
+    *,
+    config: PyPdfToTextConfig | None = None,
+    submitted_at: Mapping[str, float] | None = None,
+    batch_timeout: float | None = None,
+) -> Iterator[tuple[str, OCRResult]]:
+    """Yield ``(pdf_name, OCRResult)`` for each poller as it completes.
+
+    Consumes ``pollers``: each entry is popped from the caller's dict before
+    its result is yielded, so the poller (and the HTTP response body it holds)
+    is released as soon as it is harvested. The dict is empty when iteration
+    ends; callers must not keep a second reference to the pollers.
+
+    Done-callbacks are registered eagerly, at call time, so no completion can
+    be missed between this call and the first ``next()``. A callback only
+    enqueues the poller's name: it fires on the SDK's daemon polling thread,
+    where calling ``poller.result()`` would raise ``RuntimeError: cannot join
+    current thread``. All harvesting happens on the thread that iterates.
+
+    Deadlines:
+        * Per PDF: ``submitted_at[name]`` (or call time when not provided)
+          plus ``cfg.AZURE_DOCINTEL_TIMEOUT``. An expired poller is cancelled
+          and harvested with a short grace join; if its final poll had already
+          landed the real result is yielded, otherwise an ``OCRResult`` with
+          ``error="OCR timeout: ..."``.
+        * Batch: call time plus ``batch_timeout`` when not None. On expiry every
+          pending poller is cancelled the same way and reported as
+          ``"OCR batch budget exceeded ..."`` unless its result had landed.
+
+    Results are yielded in completion order. Never raises for Azure or
+    timeout causes (same contract as ``await_one``).
+
+    Args:
+        pollers: dict mapping pdf_name to poller. Mutated: emptied as results
+            are yielded.
+        integrator: the integrator whose ``await_one`` harvests each poller.
+        config: optional per-batch config override for ``await_one`` and the
+            per-PDF timeout. Defaults to ``integrator.config``.
+        submitted_at: ``time.monotonic()`` readings taken right after each
+            ``submit``; anchors the per-PDF deadlines.
+        batch_timeout: optional wall-clock budget for the whole batch, in
+            seconds, anchored at call time.
+    """
+    cfg = config or integrator.config
+    start = time.monotonic()
+    ready: queue.Queue[str] = queue.Queue()
+    seen: set[str] = set()
+    anchors = submitted_at or {}
+    deadline = {n: anchors.get(n, start) + cfg.AZURE_DOCINTEL_TIMEOUT for n in pollers}
+    batch_deadline = None if batch_timeout is None else start + batch_timeout
+
+    for name, poller in list(pollers.items()):
+        # CRITICAL: do NOT call poller.result() / await_one() in the callback.
+        # It fires on the SDK's daemon polling thread, which would deadlock or
+        # raise on Thread.join(self). Just enqueue; the iterating thread
+        # harvests. The SDK passes the polling method to the callback (_pm).
+        poller.add_done_callback(lambda _pm, n=name: ready.put(n))
+
+    def _await(poller: AnalyzeDocumentLROPoller, name: str, timeout: float | None) -> OCRResult:
+        # await_one never raises for Azure/timeout causes, but a bug in result
+        # rendering must not kill the stream and strand every PDF still pending.
+        try:
+            return integrator.await_one(poller, pdf_name=name, config=cfg, timeout=timeout)
+        except Exception as e:
+            logger.error(
+                "[%s] OCR harvest failed: %s: %s",
+                name,
+                type(e).__name__,
+                e,
+                exc_info=logger.getEffectiveLevel() == logging.DEBUG,
+            )
+            return OCRResult(pdf_name=name, error=f"OCR failed: {type(e).__name__}: {e}")
+
+    def _cancel(name: str) -> None:
+        polling_method = getattr(pollers[name], "_polling_method", None)
+        cancel_event = getattr(polling_method, "cancel_event", None)
+        if cancel_event is not None:
+            cancel_event.set()
+
+    def _harvest_expired(name: str, batch_expired: bool, grace_deadline: float) -> OCRResult:
+        seen.add(name)
+        # Short join, sharing one grace budget across the whole expiry pass: with
+        # cancel_event already set the daemon thread exits at its next wake, and
+        # if the final poll had already landed we get the real result.
+        result = _await(
+            pollers.pop(name), name, timeout=max(0.0, grace_deadline - time.monotonic())
+        )
+        # Only the silent-None timeout from the grace join gets relabeled with the
+        # expiry reason. A real Azure failure, an empty result, or a harvest
+        # exception that landed in the race window is reported as itself.
+        if result.succeeded or (
+            result.error is not None and not result.error.startswith("OCR timeout:")
+        ):
+            return result
+        if batch_expired:
+            error = f"OCR batch budget exceeded after {batch_timeout}s (pdf still pending)"
+        else:
+            error = f"OCR timeout: no result within AZURE_DOCINTEL_TIMEOUT={cfg.AZURE_DOCINTEL_TIMEOUT}s"
+        return OCRResult(pdf_name=name, error=error)
+
+    def _iter() -> Iterator[tuple[str, OCRResult]]:
+        while pollers:
+            now = time.monotonic()
+            next_deadline = min(deadline[n] for n in pollers)
+            if batch_deadline is not None:
+                next_deadline = min(next_deadline, batch_deadline)
+            try:
+                name = ready.get(timeout=max(0.0, next_deadline - now))
+            except queue.Empty:
+                now = time.monotonic()
+                batch_expired = batch_deadline is not None and now >= batch_deadline
+                if batch_expired:
+                    expired = list(pollers)
+                else:
+                    expired = [n for n in pollers if deadline[n] <= now]
+                # Cancel every expired poller first so their threads wind down
+                # concurrently; then join each against one shared grace budget.
+                for n in expired:
+                    _cancel(n)
+                grace_deadline = time.monotonic() + _CANCEL_GRACE_SECONDS
+                for n in expired:
+                    yield n, _harvest_expired(n, batch_expired, grace_deadline)
+                continue
+            if name in seen or name not in pollers:
+                # Duplicate callback (azure-core fires immediately on an
+                # already-done poller AND appends to its list) or already
+                # harvested on expiry.
+                continue
+            seen.add(name)
+            # No local may hold the poller across the yield: the consumer applies
+            # the result while we are suspended, and the poller owns the full
+            # response body. pop() inside the call releases it on return.
+            yield name, _await(pollers.pop(name), name, timeout=None)
+
+    return _iter()
 
 
 def await_all(
-    pollers: "Mapping[str, AnalyzeDocumentLROPoller]",
+    pollers: dict[str, AnalyzeDocumentLROPoller],
     integrator: "AzureDocIntelIntegrator",
     timeout: float | None,
     *,
     config: PyPdfToTextConfig | None = None,
 ) -> dict[str, OCRResult]:
-    """Collectively wait for many pollers and return one OCRResult per name.
+    """Collect ``iter_results`` into a dict, with ``timeout`` as the batch budget.
 
-    Registers a done-callback on each poller. The callback only records
-    completion (sets an Event when all are done). The coordinating thread
-    then harvests results via ``integrator.await_one`` — this must happen
-    on the coordinator thread, NOT inside the callback, because Azure SDK
-    callbacks fire on the poller's own daemon thread and calling
-    ``poller.result()`` from that thread triggers
-    ``RuntimeError: cannot join current thread``.
-
-    On timeout: sets ``cancel_event`` on every poller whose result is still
-    missing, waits up to ``_BUDGET_GRACE_SECONDS`` for late callbacks
-    (lucky-race window), then synthesizes
-    ``OCRResult(error="OCR batch budget exceeded ...")`` for any still
-    missing.
-
-    Args:
-        pollers: dict mapping pdf_name to poller.
-        integrator: the integrator whose await_one is used during the
-            harvest phase. Its ``_thread_local`` is updated for the LAST
-            harvest to complete (matches the "undefined in batch context"
-            semantics for AZURE_READ.last_result).
-        timeout: overall budget in seconds. None means wait indefinitely.
-        config: optional per-batch config override for ``await_one``.
+    Kept for callers that want every result at once. ``AZURE_DOCINTEL_TIMEOUT``
+    still applies to each PDF individually, and ``pollers`` is consumed exactly
+    as by ``iter_results``.
 
     Returns:
         dict mapping pdf_name to OCRResult. Never raises.
     """
-    cfg = config or integrator.config
-    results: dict[str, OCRResult] = {}
-    done_event = threading.Event()
-    lock = threading.Lock()
-    completed: set[str] = set()
-    total = len(pollers)
-    if total == 0:
-        return results
-
-    def _on_done(name: str) -> None:
-        # CRITICAL: do NOT call poller.result() / await_one() here. This
-        # callback fires on the SDK's daemon polling thread, which would
-        # deadlock or raise on Thread.join(self). Just signal completion;
-        # the coordinator thread does the result extraction.
-        with lock:
-            if name not in completed:
-                completed.add(name)
-                if len(completed) == total:
-                    done_event.set()
-
-    for name, poller in pollers.items():
-        # SDK passes the polling method to the callback; we ignore it via _pm.
-        poller.add_done_callback(lambda _pm, n=name: _on_done(n))
-
-    # Phase 1: wait for all callbacks to fire (or timeout).
-    if not done_event.wait(timeout):
-        # Budget elapsed. Cancel pending pollers and wait briefly for late
-        # callbacks (lucky-race window).
-        with lock:
-            pending_names = [n for n in pollers if n not in completed]
-        for n in pending_names:
-            polling_method = getattr(pollers[n], "_polling_method", None)
-            cancel_event = getattr(polling_method, "cancel_event", None)
-            if cancel_event is not None:
-                cancel_event.set()
-        done_event.wait(_BUDGET_GRACE_SECONDS)
-
-    # Phase 2: harvest results on the coordinating thread.
-    # Safe to call poller.result() here because we are NOT the daemon
-    # polling thread; the thread that just finished polling is the one
-    # we're joining, not ourselves.
-    with lock:
-        completed_snapshot = set(completed)
-    for name in pollers:
-        if name in completed_snapshot:
-            results[name] = integrator.await_one(
-                pollers[name],
-                pdf_name=name,
-                config=cfg,
-            )
-        else:
-            results[name] = OCRResult(
-                pdf_name=name,
-                config=cfg,
-                raw=None,
-                pages=[],
-                error=(f"OCR batch budget exceeded after {timeout}s (pdf still pending)"),
-            )
-    return results
+    return dict(iter_results(pollers, integrator, config=config, batch_timeout=timeout))
 
 
 @dataclass
@@ -192,44 +254,6 @@ class AzureDocIntelIntegrator:
 
     config: PyPdfToTextConfig = field(default_factory=PyPdfToTextConfig)
     client: DocumentIntelligenceClient | None = field(default=None, init=False, repr=False)
-    _thread_local: threading.local = field(
-        default_factory=threading.local,
-        init=False,
-        repr=False,
-    )
-
-    def reset(self):
-        """DEPRECATED. Clear the thread-local last_result.
-
-        Replaced by allowing OCRResult instances to manage their own
-        lifetime; no explicit reset is needed in the new API.
-        """
-        warnings.warn(
-            "AzureDocIntelIntegrator.reset is deprecated; OCRResult instances "
-            "manage their own lifetime. This call clears the thread-local "
-            "back-compat slot.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        self._thread_local.last_result = AnalyzeResult({})
-        self._thread_local.ocr_result = None
-
-    @property
-    def last_result(self) -> AnalyzeResult:
-        """DEPRECATED. The raw AnalyzeResult from this thread's most recent
-        await_one call, or AnalyzeResult({}) if no OCR has run on this thread.
-
-        Replaced by ``PdfExtract.ocr_result.raw`` (or ``OCRResult.raw``).
-        Will be removed in a future minor release.
-        """
-        warnings.warn(
-            "AzureDocIntelIntegrator.last_result is deprecated and will be "
-            "removed in a future release. Use PdfExtract.ocr_result.raw or "
-            "OCRResult.raw instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        return getattr(self._thread_local, "last_result", AnalyzeResult({}))
 
     def create_client(self) -> bool:
         """Create or retrieve the cached DocumentIntelligenceClient.
@@ -304,6 +328,7 @@ class AzureDocIntelIntegrator:
         pdf_name: str = "",
         *,
         config: PyPdfToTextConfig | None = None,
+        timeout: float | None = None,
     ) -> OCRResult:
         """Wait for the given poller to complete and build an OCRResult.
 
@@ -312,14 +337,13 @@ class AzureDocIntelIntegrator:
         OCRResult carries error=str when the wait timed out, the SDK raised
         an AzureError, or the result had zero pages.
 
-        Updates ``self._thread_local`` for deprecated callers of
-        ``self.last_result`` / ``self.handwritten_ratio`` / etc.
-
         Args:
             poller: poller previously returned by ``self.submit``.
             pdf_name: identifier for log correlation; carried into the
                 returned OCRResult.
             config: optional per-call override. Defaults to ``self.config``.
+            timeout: seconds to wait for the poller. Defaults to
+                ``cfg.AZURE_DOCINTEL_TIMEOUT``.
 
         Returns:
             An OCRResult. Never raises on Azure/timeout errors; check
@@ -329,8 +353,9 @@ class AzureDocIntelIntegrator:
         prefix = f"[{pdf_name}] " if pdf_name else ""
         raw: AnalyzeResult | None
         error: str | None = None
+        effective_timeout = timeout if timeout is not None else cfg.AZURE_DOCINTEL_TIMEOUT
         try:
-            raw = poller.result(cfg.AZURE_DOCINTEL_TIMEOUT)
+            raw = poller.result(effective_timeout)
         except HttpResponseError as e:
             raw = None
             error = f"OCR failed: HttpResponseError: {e}"
@@ -339,10 +364,7 @@ class AzureDocIntelIntegrator:
             error = f"OCR failed: {type(e).__name__}: {e}"
         if raw is None and error is None:
             # poller.result returned None — the timeout-without-exception case.
-            error = (
-                f"OCR timeout: poller returned no analyzeResult after "
-                f"{cfg.AZURE_DOCINTEL_TIMEOUT}s"
-            )
+            error = f"OCR timeout: poller returned no analyzeResult after {effective_timeout}s"
         if error is not None:
             # Signal the daemon poll thread to exit. Best-effort: not all
             # mocked pollers have a CancellablePolling, so guard the access.
@@ -355,16 +377,7 @@ class AzureDocIntelIntegrator:
             error = error or "OCR failed: empty result (analyzeResult.pages was empty)"
         elif raw is not None:
             pages = [layout.fixed_width_page(doc_page, cfg) for doc_page in raw.pages]
-        result = OCRResult(
-            pdf_name=pdf_name,
-            config=cfg,
-            raw=raw,
-            pages=pages,
-            error=error,
-        )
-        # Update thread-local for back-compat consumers.
-        self._thread_local.last_result = raw if raw is not None else AnalyzeResult({})
-        self._thread_local.ocr_result = result
+        result = OCRResult(pdf_name=pdf_name, pages=pages, error=error, raw=raw)
         if result.succeeded:
             logger.info(
                 "%sOCR completed: %d pages rendered.",
@@ -396,59 +409,6 @@ class AzureDocIntelIntegrator:
             return []
         result = self.await_one(poller, pdf_name=pdf_name)
         return result.pages
-
-    def handwritten_ratio(
-        self,
-        page_index: int,
-        handwritten_confidence_limit: float | None = None,
-    ) -> float:
-        """DEPRECATED. Returns the handwritten ratio for the given page from
-        this thread's most-recent OCR result.
-
-        Replaced by ``OCRResult.handwritten_ratio(page_index)`` (or
-        ``PdfExtract.ocr_result.handwritten_ratio(page_index)``).
-        """
-        warnings.warn(
-            "AzureDocIntelIntegrator.handwritten_ratio is deprecated. Use "
-            "OCRResult.handwritten_ratio (e.g. via PdfExtract.ocr_result) "
-            "instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        if handwritten_confidence_limit is not None:
-            logger.warning(
-                "handwritten_confidence_limit arg is no longer supported; "
-                "set config.OCR_HANDWRITTEN_CONFIDENCE_LIMIT instead. "
-                "(requested=%.2f, effective=%.2f)",
-                handwritten_confidence_limit,
-                self.config.OCR_HANDWRITTEN_CONFIDENCE_LIMIT,
-            )
-        result = getattr(self._thread_local, "ocr_result", None)
-        return result.handwritten_ratio(page_index) if result is not None else 0.0
-
-    def rotation_degrees(self, page_index: int) -> float:
-        """DEPRECATED. See OCRResult.rotation_degrees."""
-        warnings.warn(
-            "AzureDocIntelIntegrator.rotation_degrees is deprecated. Use "
-            "OCRResult.rotation_degrees (e.g. via PdfExtract.ocr_result) "
-            "instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        result = getattr(self._thread_local, "ocr_result", None)
-        return result.rotation_degrees(page_index) if result is not None else 0.0
-
-    def page_at_index(self, page_index: int) -> DocumentPage | None:
-        """DEPRECATED. See OCRResult.page_at_index."""
-        warnings.warn(
-            "AzureDocIntelIntegrator.page_at_index is deprecated. Use "
-            "OCRResult.page_at_index (e.g. via PdfExtract.ocr_result) "
-            "instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        result = getattr(self._thread_local, "ocr_result", None)
-        return result.page_at_index(page_index) if result is not None else None
 
 
 AZURE_READ = AzureDocIntelIntegrator()

@@ -114,6 +114,19 @@ class TestPyPdfToTextConfig:
         assert config.IMAGE_WHITE_POINT == 180
 
 
+    @pytest.mark.unit
+    def test_batch_timeout_default_is_none(self):
+        """AZURE_DOCINTEL_BATCH_TIMEOUT defaults to None (no batch-wide bound)."""
+        config = PyPdfToTextConfig(overrides={"INHERIT_CONSTANTS": False})
+        assert config.AZURE_DOCINTEL_BATCH_TIMEOUT is None
+
+    @pytest.mark.unit
+    def test_batch_timeout_override(self):
+        """AZURE_DOCINTEL_BATCH_TIMEOUT is overridable via the overrides dict."""
+        config = PyPdfToTextConfig(overrides={"AZURE_DOCINTEL_BATCH_TIMEOUT": 300})
+        assert config.AZURE_DOCINTEL_BATCH_TIMEOUT == 300
+
+
 class TestDictConfigShorthand:
     """Test that PdfExtract and PdfExtractBatch accept a dict as the config parameter."""
 

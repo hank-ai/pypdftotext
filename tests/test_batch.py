@@ -16,6 +16,17 @@ from pypdftotext.azure_docintel_integrator import AzureDocIntelIntegrator
 from pypdftotext.ocr_result import OCRResult
 
 
+def _streamed(fake):
+    """Adapt a dict-returning fake into the iter_results shape (an iterator of
+    (pdf_name, OCRResult) tuples) so the batch consumes it like the real thing."""
+
+    def _fake_iter_results(pollers, integrator, *, config=None, submitted_at=None,
+                           batch_timeout=None):
+        return iter(fake(pollers, integrator, config=config).items())
+
+    return _fake_iter_results
+
+
 class TestPdfExtractBatch(unittest.TestCase):
     """Test cases for PdfExtractBatch class."""
 
@@ -146,7 +157,7 @@ class TestPdfExtractBatch(unittest.TestCase):
         fake_poller = MagicMock(name="poller")
         expected_pages = ["\n".join(page) for page in self.all70th_expected_text]
 
-        def fake_await_all(pollers, integrator, timeout, *, config=None):
+        def fake_results(pollers, integrator, *, config=None):
             extract = batch.pdf_extracts["all70th"]
             n_ocr = len(extract.ocr_page_idxs)
             raw = AnalyzeResult({
@@ -164,7 +175,7 @@ class TestPdfExtractBatch(unittest.TestCase):
             })
             return {
                 "all70th": OCRResult(
-                    pdf_name="all70th", config=config or ocr_config,
+                    pdf_name="all70th",
                     raw=raw,
                     pages=expected_pages[:n_ocr],
                     error=None,
@@ -172,7 +183,7 @@ class TestPdfExtractBatch(unittest.TestCase):
             }
 
         with patch.object(AZURE_READ, "submit", return_value=fake_poller) as mock_submit, \
-             patch("pypdftotext.batch.await_all", side_effect=fake_await_all) as mock_await_all:
+             patch("pypdftotext.batch.iter_results", side_effect=_streamed(fake_results)) as mock_iter_results:
             result = batch.extract_all()
 
         # Should have results
@@ -184,7 +195,7 @@ class TestPdfExtractBatch(unittest.TestCase):
 
         # OCR was submitted and awaited
         mock_submit.assert_called()
-        mock_await_all.assert_called()
+        mock_iter_results.assert_called()
 
     def test_parallel_ocr_with_multiple_pdfs(self):
         """Test that batch processes multiple PDFs via the submit/await_all path."""
@@ -212,7 +223,7 @@ class TestPdfExtractBatch(unittest.TestCase):
         batch = PdfExtractBatch(pdfs, config=ocr_config)
         fake_poller = MagicMock(name="poller")
 
-        def fake_await_all(pollers, integrator, timeout, *, config=None):
+        def fake_results(pollers, integrator, *, config=None):
             results = {}
             for name in pollers:
                 extract = batch.pdf_extracts[name]
@@ -230,7 +241,7 @@ class TestPdfExtractBatch(unittest.TestCase):
                     "styles": [],
                 })
                 results[name] = OCRResult(
-                    pdf_name=name, config=config or ocr_config,
+                    pdf_name=name,
                     raw=raw,
                     pages=["OCR text"] * len(extract.ocr_page_idxs),
                     error=None,
@@ -238,7 +249,7 @@ class TestPdfExtractBatch(unittest.TestCase):
             return results
 
         with patch.object(AZURE_READ, "submit", return_value=fake_poller), \
-             patch("pypdftotext.batch.await_all", side_effect=fake_await_all):
+             patch("pypdftotext.batch.iter_results", side_effect=_streamed(fake_results)):
             result = batch.extract_all()
 
         # Should have results for both PDFs
@@ -267,11 +278,11 @@ class TestPdfExtractBatch(unittest.TestCase):
         batch = PdfExtractBatch(pdfs, config=ocr_config)
         fake_poller = MagicMock(name="poller")
 
-        def fake_await_all(pollers, integrator, timeout, *, config=None):
+        def fake_results(pollers, integrator, *, config=None):
             # Simulate Azure API error returned as an OCRResult with error set
             return {
                 name: OCRResult(
-                    pdf_name=name, config=config or ocr_config,
+                    pdf_name=name,
                     raw=None, pages=[],
                     error="OCR failed: Azure API Error",
                 )
@@ -279,7 +290,7 @@ class TestPdfExtractBatch(unittest.TestCase):
             }
 
         with patch.object(AZURE_READ, "submit", return_value=fake_poller), \
-             patch("pypdftotext.batch.await_all", side_effect=fake_await_all):
+             patch("pypdftotext.batch.iter_results", side_effect=_streamed(fake_results)):
             # Should not raise exception
             result = batch.extract_all()
 
@@ -406,10 +417,10 @@ class TestPerformBatchOcrSubmitAndAwait(unittest.TestCase):
         batch = PdfExtractBatch({"a": self.pdf_bytes, "b": self.pdf_bytes}, config=self.cfg)
         fake_poller = MagicMock(name="poller")
 
-        def fake_await_all(pollers, integrator, timeout, *, config=None):
+        def fake_results(pollers, integrator, *, config=None):
             return {
                 name: OCRResult(
-                    pdf_name=name, config=config or self.cfg,
+                    pdf_name=name,
                     raw=self._make_raw(batch.pdf_extracts[name]),
                     pages=["OCR_TEXT"] * len(batch.pdf_extracts[name].ocr_page_idxs),
                     error=None,
@@ -418,16 +429,18 @@ class TestPerformBatchOcrSubmitAndAwait(unittest.TestCase):
             }
 
         with patch.object(AZURE_READ, "submit", return_value=fake_poller) as mock_submit, \
-             patch("pypdftotext.batch.await_all", side_effect=fake_await_all) as mock_await_all, \
+             patch("pypdftotext.batch.iter_results", side_effect=_streamed(fake_results)) as mock_iter_results, \
              patch("pypdftotext.batch.ThreadPoolExecutor") as mock_pool:
             batch.extract_all()
         # Submit was called once per PDF.
         self.assertEqual(mock_submit.call_count, 2)
-        # await_all was called once with both pollers.
-        self.assertEqual(mock_await_all.call_count, 1)
-        args, kwargs = mock_await_all.call_args
+        # iter_results was called once with both pollers, their submit times, and no batch budget.
+        self.assertEqual(mock_iter_results.call_count, 1)
+        args, kwargs = mock_iter_results.call_args
         pollers_arg = args[0] if args else kwargs["pollers"]
         self.assertEqual(set(pollers_arg.keys()), {"a", "b"})
+        self.assertIsNone(kwargs["batch_timeout"])
+        self.assertEqual(set(kwargs["submitted_at"].keys()), {"a", "b"})
         # ThreadPoolExecutor must NOT be constructed inside _perform_batch_ocr.
         self.assertEqual(mock_pool.call_count, 0)
 
@@ -441,23 +454,23 @@ class TestPerformBatchOcrSubmitAndAwait(unittest.TestCase):
         batch = PdfExtractBatch({"good": self.pdf_bytes, "bad": self.pdf_bytes}, config=self.cfg)
         fake_poller = MagicMock(name="poller")
 
-        def fake_await_all(pollers, integrator, timeout, *, config=None):
+        def fake_results(pollers, integrator, *, config=None):
             good_extract = batch.pdf_extracts["good"]
             good_pages = ["OCR_GOOD"] * len(good_extract.ocr_page_idxs)
             return {
                 "good": OCRResult(
-                    pdf_name="good", config=config or self.cfg,
+                    pdf_name="good",
                     raw=self._make_raw(good_extract),
                     pages=good_pages, error=None,
                 ),
                 "bad": OCRResult(
-                    pdf_name="bad", config=config or self.cfg, raw=None,
+                    pdf_name="bad", raw=None,
                     pages=[], error="OCR timeout: simulated",
                 ),
             }
 
         with patch.object(AZURE_READ, "submit", return_value=fake_poller), \
-             patch("pypdftotext.batch.await_all", side_effect=fake_await_all):
+             patch("pypdftotext.batch.iter_results", side_effect=_streamed(fake_results)):
             results = batch.extract_all()
         # Both PDFs are in the results dict.
         self.assertIn("good", results)
@@ -474,6 +487,89 @@ class TestPerformBatchOcrSubmitAndAwait(unittest.TestCase):
                 bad_extract.extracted_pages[idx].ocr_error, "OCR timeout: simulated",
             )
             self.assertEqual(bad_extract.extracted_pages[idx].text, "")
+
+
+    def test_results_are_applied_as_they_stream(self):
+        """Each result is applied before the next one is pulled from the stream."""
+        from pypdftotext import AZURE_READ
+        from pypdftotext.batch import PdfExtractBatch
+        from pypdftotext.ocr_result import OCRResult
+        from unittest.mock import patch
+
+        batch = PdfExtractBatch({"a": self.pdf_bytes, "b": self.pdf_bytes}, config=self.cfg)
+        applied_before_second_yield = {}
+
+        def fake_iter_results(pollers, integrator, *, config=None, submitted_at=None,
+                              batch_timeout=None):
+            ext_a = batch.pdf_extracts["a"]
+            yield "a", OCRResult(pdf_name="a", raw=self._make_raw(ext_a),
+                                 pages=["OCR_A"] * len(ext_a.ocr_page_idxs))
+            # By the time the consumer asks for the next item, "a" must be applied.
+            applied_before_second_yield["a"] = ext_a.extracted_pages[ext_a.ocr_page_idxs[0]].text
+            ext_b = batch.pdf_extracts["b"]
+            yield "b", OCRResult(pdf_name="b", raw=self._make_raw(ext_b),
+                                 pages=["OCR_B"] * len(ext_b.ocr_page_idxs))
+
+        with patch.object(AZURE_READ, "submit", return_value=MagicMock(name="poller")), \
+             patch("pypdftotext.batch.iter_results", side_effect=fake_iter_results):
+            batch.extract_all()
+        self.assertEqual(applied_before_second_yield["a"], "OCR_A")
+
+    def test_apply_exception_for_one_pdf_does_not_stop_stream(self):
+        """An exception applying one PDF's result does not stop the remaining PDFs."""
+        from pypdftotext import AZURE_READ
+        from pypdftotext.batch import PdfExtractBatch
+        from pypdftotext.ocr_result import OCRResult
+        from unittest.mock import patch
+
+        batch = PdfExtractBatch({"boom": self.pdf_bytes, "ok": self.pdf_bytes}, config=self.cfg)
+
+        def fake_iter_results(pollers, integrator, *, config=None, submitted_at=None,
+                              batch_timeout=None):
+            for name in ("boom", "ok"):
+                ext = batch.pdf_extracts[name]
+                yield name, OCRResult(pdf_name=name, raw=self._make_raw(ext),
+                                      pages=["OCR"] * len(ext.ocr_page_idxs))
+
+        with patch.object(batch.pdf_extracts["boom"], "_apply_ocr_result",
+                          side_effect=RuntimeError("apply failed")), \
+             patch.object(AZURE_READ, "submit", return_value=MagicMock(name="poller")), \
+             patch("pypdftotext.batch.iter_results", side_effect=fake_iter_results):
+            results = batch.extract_all()
+        ok = results["ok"]
+        for idx in ok.ocr_page_idxs:
+            self.assertEqual(ok.extracted_pages[idx].text, "OCR")
+
+    def test_no_client_pdfs_get_error_and_are_not_streamed(self):
+        """A PDF whose submit() returns None gets the no-client error inline and is
+        excluded from the pollers handed to iter_results."""
+        from pypdftotext import AZURE_READ
+        from pypdftotext.batch import PdfExtractBatch
+        from pypdftotext.ocr_result import OCRResult
+        from unittest.mock import patch
+
+        batch = PdfExtractBatch({"a": self.pdf_bytes, "b": self.pdf_bytes}, config=self.cfg)
+        submit_results = iter([None, MagicMock(name="poller")])  # "a": no client; "b": ok
+
+        def fake_iter_results(pollers, integrator, *, config=None, submitted_at=None,
+                              batch_timeout=None):
+            self.assertEqual(set(pollers), {"b"})
+            self.assertEqual(set(submitted_at), {"b"})
+            ext = batch.pdf_extracts["b"]
+            yield "b", OCRResult(pdf_name="b", raw=self._make_raw(ext),
+                                 pages=["OCR_B"] * len(ext.ocr_page_idxs))
+
+        with patch.object(AZURE_READ, "submit", side_effect=lambda *a, **k: next(submit_results)), \
+             patch("pypdftotext.batch.iter_results", side_effect=fake_iter_results):
+            results = batch.extract_all()
+        a = results["a"]
+        self.assertTrue(
+            a.extracted_pages[a.ocr_page_idxs[0]].ocr_error.startswith(
+                "OCR failed: no client available"
+            )
+        )
+        b = results["b"]
+        self.assertEqual(b.extracted_pages[b.ocr_page_idxs[0]].text, "OCR_B")
 
 
 class TestInvalidPdfs(unittest.TestCase):
