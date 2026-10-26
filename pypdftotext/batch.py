@@ -159,7 +159,7 @@ class PdfExtractBatch:
             self._perform_batch_ocr()
         except Exception as e:  # noqa: BLE001  # batch must survive OCR failures to return partial results
             logger.error(
-                "PdfExtractBatch OCR Error: %e",
+                "PdfExtractBatch OCR Error: %s",
                 e,
                 exc_info=logger.getEffectiveLevel() == logging.DEBUG,
             )
